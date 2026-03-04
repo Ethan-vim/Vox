@@ -23,6 +23,9 @@ nhead: 8
 num_layers: 4
 dropout: 0.3
 
+# Data loading
+num_workers: 4              # parallel data-loading workers (0 = main process only)
+
 # Training
 epochs: 100
 batch_size: 8

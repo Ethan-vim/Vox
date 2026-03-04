@@ -32,29 +32,29 @@ A real-time ASL word-level recognition system that captures live webcam video, p
 - **[Troubleshooting](#troubleshooting)** — Line 882
   - [HTML files masquerading as videos](#html-files-masquerading-as-videos) — Line 884
   - [MediaPipe installation issues](#mediapipe-installation-issues) — Line 887
-  - [CUDA out of memory](#cuda-out-of-memory) — Line 893
-  - [Webcam not detected](#webcam-not-detected) — Line 899
-  - [Low accuracy](#low-accuracy) — Line 905
-  - [Diagnosing partial data](#diagnosing-partial-data-most-common-issue) — Line 910
-  - [wlasl_variant / num_classes mismatch](#wlasl_variant--num_classes-mismatch) — Line 957
-- **[Recommended Configurations](#recommended-configurations)** — Line 963
-  - [WLASL100 (recommended starting point)](#wlasl100-recommended-starting-point) — Line 967
-  - [WLASL300](#wlasl300) — Line 1000
-  - [WLASL1000 / WLASL2000](#wlasl1000--wlasl2000) — Line 1022
-  - [Video Classifier (Approach B)](#video-classifier-approach-b) — Line 1046
-  - [Fusion (Approach C)](#fusion-approach-c) — Line 1062
-- **[Tips & Best Practices](#tips--best-practices)** — Line 1081
-  - [Hardware-Specific Setup](#hardware-specific-setup) — Line 1083
-  - [Training with Limited Data](#training-with-limited-data) — Line 1106
-  - [Improving Accuracy](#improving-accuracy) — Line 1118
-  - [What to Expect](#what-to-expect) — Line 1129
-  - [Common Pitfalls](#common-pitfalls) — Line 1141
-- **[Recommended Library & CUDA Versions](#recommended-library--cuda-versions)** — Line 1152
-  - [PyTorch ↔ CUDA Compatibility](#pytorch--cuda-compatibility) — Line 1156
-  - [MediaPipe](#mediapipe) — Line 1175
-  - [Other Key Libraries](#other-key-libraries) — Line 1187
-- **[Citation](#citation)** — Line 1204
-- **[License](#license)** — Line 1216
+  - [CUDA out of memory](#cuda-out-of-memory) — Line 894
+  - [Webcam not detected](#webcam-not-detected) — Line 900
+  - [Low accuracy](#low-accuracy) — Line 906
+  - [Diagnosing partial data](#diagnosing-partial-data-most-common-issue) — Line 911
+  - [wlasl_variant / num_classes mismatch](#wlasl_variant--num_classes-mismatch) — Line 958
+- **[Recommended Configurations](#recommended-configurations)** — Line 964
+  - [WLASL100 (recommended starting point)](#wlasl100-recommended-starting-point) — Line 968
+  - [WLASL300](#wlasl300) — Line 1001
+  - [WLASL1000 / WLASL2000](#wlasl1000--wlasl2000) — Line 1023
+  - [Video Classifier (Approach B)](#video-classifier-approach-b) — Line 1047
+  - [Fusion (Approach C)](#fusion-approach-c) — Line 1063
+- **[Tips & Best Practices](#tips--best-practices)** — Line 1082
+  - [Hardware-Specific Setup](#hardware-specific-setup) — Line 1084
+  - [Training with Limited Data](#training-with-limited-data) — Line 1107
+  - [Improving Accuracy](#improving-accuracy) — Line 1119
+  - [What to Expect](#what-to-expect) — Line 1130
+  - [Common Pitfalls](#common-pitfalls) — Line 1142
+- **[Recommended Library & CUDA Versions](#recommended-library--cuda-versions)** — Line 1153
+  - [PyTorch ↔ CUDA Compatibility](#pytorch--cuda-compatibility) — Line 1157
+  - [MediaPipe](#mediapipe) — Line 1176
+  - [Other Key Libraries](#other-key-libraries) — Line 1188
+- **[Citation](#citation)** — Line 1205
+- **[License](#license)** — Line 1217
 
 ---
 
@@ -887,6 +887,7 @@ Expired WLASL URLs often return an HTML lander page (saved as `.mp4`) rather tha
 ### MediaPipe installation issues
 - Compatible with Python 3.9–3.12.
 - On macOS with Apple Silicon: `pip install mediapipe-silicon`
+- If you see `AttributeError: module 'mediapipe' has no attribute 'solutions'`, your MediaPipe installation is broken or incompatible. Reinstall with `pip install --force-reinstall 'mediapipe>=0.10.7,<0.11.0'` (or `mediapipe-silicon` on Apple Silicon). The code catches this error and prints a helpful message.
 - Zero-padded keypoints for frames where detection fails are handled automatically.
 - Preprocessing uses `spawn` multiprocessing context (not `fork`) to avoid MediaPipe crashes on macOS.
 

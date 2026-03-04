@@ -236,7 +236,19 @@ def extract_keypoints_mediapipe(
         The keypoint array, or None if the video could not be opened.
     """
     # Lazy import to avoid loading mediapipe at module level
-    import mediapipe as mp
+    try:
+        import mediapipe as mp
+
+        mp_holistic = mp.solutions.holistic
+    except (ImportError, AttributeError) as exc:
+        raise ImportError(
+            "MediaPipe is required but could not be loaded. "
+            "Install it with:\n"
+            "  pip install 'mediapipe>=0.10.7,<0.11.0'\n"
+            "On Apple Silicon Mac:\n"
+            "  pip install mediapipe-silicon\n"
+            f"Original error: {exc}"
+        ) from exc
 
     video_path = Path(video_path)
     output_path = Path(output_path)
@@ -246,8 +258,6 @@ def extract_keypoints_mediapipe(
     if not cap.isOpened():
         logger.warning("Cannot open video: %s", video_path)
         return None
-
-    mp_holistic = mp.solutions.holistic
     holistic = mp_holistic.Holistic(
         static_image_mode=False,
         model_complexity=1,

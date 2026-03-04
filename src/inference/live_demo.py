@@ -134,10 +134,21 @@ class LivePredictor:
         self.model.eval()
 
         # MediaPipe
-        import mediapipe as mp
-        self._mp_holistic = mp.solutions.holistic
-        self._mp_drawing = mp.solutions.drawing_utils
-        self._mp_drawing_styles = mp.solutions.drawing_styles
+        try:
+            import mediapipe as mp
+
+            self._mp_holistic = mp.solutions.holistic
+            self._mp_drawing = mp.solutions.drawing_utils
+            self._mp_drawing_styles = mp.solutions.drawing_styles
+        except (ImportError, AttributeError) as exc:
+            raise ImportError(
+                "MediaPipe is required but could not be loaded. "
+                "Install it with:\n"
+                "  pip install 'mediapipe>=0.10.7,<0.11.0'\n"
+                "On Apple Silicon Mac:\n"
+                "  pip install mediapipe-silicon\n"
+                f"Original error: {exc}"
+            ) from exc
         self.holistic = self._mp_holistic.Holistic(
             static_image_mode=False,
             model_complexity=1,
@@ -367,9 +378,13 @@ class ASLDisplay:
 
         # Draw MediaPipe landmarks if available
         if mp_results is not None:
-            import mediapipe as mp
-            mp_drawing = mp.solutions.drawing_utils
-            mp_holistic = mp.solutions.holistic
+            try:
+                import mediapipe as mp
+
+                mp_drawing = mp.solutions.drawing_utils
+                mp_holistic = mp.solutions.holistic
+            except (ImportError, AttributeError):
+                return frame  # Skip landmark drawing if mediapipe unavailable
             drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
 
             if mp_results.pose_landmarks:

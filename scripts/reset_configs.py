@@ -48,6 +48,9 @@ nhead: 8
 num_layers: 4
 dropout: 0.3
 
+# Data loading
+num_workers: 4              # parallel data-loading workers (0 = main process only)
+
 # Training
 epochs: 100
 batch_size: 32
@@ -102,6 +105,9 @@ image_size: 224            # reduce to 112 if GPU memory is tight
 
 # Model
 dropout: 0.4
+
+# Data loading
+num_workers: 4              # parallel data-loading workers (0 = main process only)
 
 # Training
 epochs: 100
@@ -161,6 +167,9 @@ d_model: 256
 nhead: 8
 num_layers: 4
 dropout: 0.3
+
+# Data loading
+num_workers: 4              # parallel data-loading workers (0 = main process only)
 
 # Training
 epochs: 100
