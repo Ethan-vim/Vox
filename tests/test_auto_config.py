@@ -152,8 +152,8 @@ class TestBuildConfigValues:
         assert cfg["T"] == 64
         assert cfg["fp16"] is True
         assert cfg["wlasl_variant"] == 100
-        assert cfg["d_model"] == 256
-        assert cfg["num_layers"] == 4
+        assert cfg["d_model"] == 128
+        assert cfg["num_layers"] == 3
 
     def test_pose_cpu_100(self, cpu_hw):
         cfg = auto_config.build_config_values("pose", 100, "cpu", cpu_hw)

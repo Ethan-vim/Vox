@@ -13,7 +13,7 @@ T: 32                     # video models are memory-heavy, keep T lower
 image_size: 224            # reduce to 112 if GPU memory is tight
 
 # Model
-dropout: 0.4
+dropout: 0.3
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
@@ -22,13 +22,13 @@ num_workers: 4              # parallel data-loading workers (0 = main process on
 epochs: 100
 batch_size: 8              # 3D CNNs need small batches
 lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-weight_decay: 1.0e-4
+weight_decay: 0.01
 warmup_epochs: 10
 label_smoothing: 0.1
 grad_clip: 1.0
 fp16: true                 # essential for video models
 weighted_sampling: false
-early_stopping_patience: 20
+early_stopping_patience: 15
 
 # Scheduler
 scheduler: onecycle

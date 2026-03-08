@@ -37,7 +37,7 @@ class TestConfigDefaults:
 
     def test_mixup_alpha_default(self):
         cfg = Config()
-        assert cfg.mixup_alpha == 0.2
+        assert cfg.mixup_alpha == 0.3
 
     def test_use_tta_default(self):
         cfg = Config()

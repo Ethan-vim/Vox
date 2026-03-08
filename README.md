@@ -331,9 +331,9 @@ fp16: false                  # FP16 only works on CUDA
 batch_size: 8                # smaller batches to avoid memory pressure
 num_workers: 2
 T: 64
-d_model: 256
+d_model: 128
 dropout: 0.3
-lr: 1.0e-4
+lr: 5.0e-4
 scheduler: onecycle
 weighted_sampling: true
 epochs: 100
@@ -350,9 +350,9 @@ fp16: true                   # faster training, lower memory
 batch_size: 32               # increase to 64 for large GPUs
 num_workers: 4
 T: 64
-d_model: 256
+d_model: 128
 dropout: 0.3
-lr: 1.0e-4
+lr: 5.0e-4
 scheduler: onecycle
 weighted_sampling: true
 epochs: 100
@@ -369,9 +369,9 @@ fp16: false                  # MPS does not support FP16 reliably
 batch_size: 16
 num_workers: 2
 T: 64
-d_model: 256
+d_model: 128
 dropout: 0.3
-lr: 1.0e-4
+lr: 5.0e-4
 scheduler: onecycle
 weighted_sampling: true
 epochs: 100
@@ -826,9 +826,9 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `backbone` | Video backbone: `r2plus1d_18`, `r3d_18`, `mc3_18`, `slow_r50`, `slowfast_r50`, `x3d_m` | `r2plus1d_18` |
 | `pretrained` | Use pretrained backbone weights (Approach B/C) | `true` |
 | `num_keypoints` | Number of MediaPipe landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face) | `543` |
-| `d_model` | Transformer/LSTM embedding dimension | `256` |
-| `nhead` | Number of attention heads | `8` |
-| `num_layers` | Number of encoder layers | `4` |
+| `d_model` | Transformer/LSTM embedding dimension | `128` |
+| `nhead` | Number of attention heads | `4` |
+| `num_layers` | Number of encoder layers | `3` |
 | `dropout` | Dropout rate | `0.3` |
 | `use_motion` | Concatenate velocity (frame differences) with position features | `true` |
 | `fusion` | Fusion strategy: `concat` or `attention` (Approach C only) | `concat` |
@@ -841,14 +841,14 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `epochs` | Maximum training epochs | `100` |
 | `batch_size` | Training batch size | `32` |
 | `lr` | Learning rate | `1e-4` |
-| `weight_decay` | AdamW weight decay | `1e-4` |
+| `weight_decay` | AdamW weight decay | `0.01` |
 | `warmup_epochs` | Linear warmup epochs before scheduler takes over | `10` |
 | `label_smoothing` | Label smoothing factor (0 = disabled) | `0.1` |
 | `grad_clip` | Max gradient norm for clipping | `1.0` |
 | `fp16` | Mixed-precision (FP16) training | `true` |
 | `weighted_sampling` | Weighted sampler to counter class imbalance | `false` |
-| `early_stopping_patience` | Epochs without val improvement before stopping | `20` |
-| `mixup_alpha` | Mixup interpolation parameter (0 = disabled) | `0.2` |
+| `early_stopping_patience` | Epochs without val improvement before stopping | `15` |
+| `mixup_alpha` | Mixup interpolation parameter (0 = disabled) | `0.3` |
 | `scheduler` | LR scheduler: `onecycle` or `cosine` (warmup + cosine annealing) | `onecycle` |
 
 **Evaluation:**
@@ -899,14 +899,15 @@ The recommended starting approach. MediaPipe Holistic extracts 543 landmarks per
 **Data augmentation pipeline** (training only):
 - Temporal speed perturbation (0.8x–1.2x)
 - Random temporal crop to T frames
+- Temporal flip (p=0.3) — reverse temporal order for regularization
+- Keypoint horizontal flip with landmark swapping
 - Keypoint rotation (up to 15 degrees)
 - Keypoint translation (up to 0.1 shift)
-- Keypoint horizontal flip with landmark swapping
-- Keypoint dropout (frame-level and landmark-level)
 - Keypoint noise (sigma=0.02)
 - Random scaling (0.9x–1.1x)
+- Keypoint dropout (frame-level and landmark-level)
 
-**Regularization:** Mixup interpolation (`mixup_alpha: 0.2`), label smoothing, dropout, and weighted sampling for class imbalance.
+**Regularization:** Mixup interpolation (`mixup_alpha: 0.3`), label smoothing (0.1), dropout (0.3), weight decay (0.01), and weighted sampling for class imbalance.
 
 ### Approach B: RGB Video Classifier
 
@@ -1024,28 +1025,27 @@ approach: pose_transformer
 wlasl_variant: 100
 T: 64
 use_motion: true            # velocity features (position + frame differences)
-d_model: 256
-nhead: 8
-num_layers: 4
+d_model: 128
+nhead: 4
+num_layers: 3
 dropout: 0.3
 batch_size: 32
-lr: 1.0e-3
+lr: 5.0e-4
 scheduler: onecycle
 warmup_epochs: 10
 label_smoothing: 0.1
-mixup_alpha: 0.2            # mixup regularization
+mixup_alpha: 0.3            # mixup regularization
 weighted_sampling: true     # important — classes are imbalanced
-early_stopping_patience: 20
+early_stopping_patience: 15
 epochs: 100
 ```
 
-With very few training videos (<500 usable), increase regularization:
+With very few training videos (<500 usable), reduce model further:
 
 ```yaml
-dropout: 0.4
-label_smoothing: 0.15
-mixup_alpha: 0.3
+d_model: 64
 batch_size: 16
+lr: 3.0e-4
 ```
 
 ### WLASL300
@@ -1056,10 +1056,10 @@ batch_size: 16
 approach: pose_transformer
 wlasl_variant: 300
 T: 64
-d_model: 256
-nhead: 8
-num_layers: 6           # deeper than WLASL100
-dropout: 0.25
+d_model: 128
+nhead: 4
+num_layers: 4           # deeper than WLASL100
+dropout: 0.4
 batch_size: 32
 lr: 5.0e-4
 scheduler: cosine
@@ -1078,10 +1078,10 @@ Much larger class count. Needs more model capacity and training time.
 approach: pose_transformer
 wlasl_variant: 1000       # or 2000
 T: 64
-d_model: 384              # wider
+d_model: 256              # wider for larger vocabulary
 nhead: 8
-num_layers: 6
-dropout: 0.2
+num_layers: 4
+dropout: 0.4
 batch_size: 64
 lr: 5.0e-4
 scheduler: cosine
@@ -1106,7 +1106,7 @@ T: 32                     # video models are memory-heavy, keep T lower
 image_size: 224            # reduce to 112 if GPU memory is tight
 batch_size: 8              # 3D CNNs need small batches
 lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-dropout: 0.4
+dropout: 0.3
 fp16: true                 # essential for video models
 ```
 
@@ -1159,7 +1159,7 @@ Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_si
 WLASL's expired URLs mean you may only get 30–60% of the annotated videos. When your training set is small (<500 samples for 100 classes):
 
 1. **Enable weighted sampling** (`weighted_sampling: true`) — ensures every class is seen equally despite imbalance.
-2. **Increase dropout** to 0.4–0.5 to reduce overfitting.
+2. **Increase dropout** to 0.4 to reduce overfitting.
 3. **Increase label smoothing** to 0.15–0.2 for better calibration.
 4. **Use smaller batch sizes** (8–16) so the model sees more update steps per epoch.
 5. **Lower the learning rate** to 5e-4 or 3e-4 with cosine scheduler.
@@ -1170,7 +1170,7 @@ WLASL's expired URLs mean you may only get 30–60% of the annotated videos. Whe
 
 - **Start with Approach A** (pose_transformer). It trains fastest and is easiest to debug.
 - **Enable motion features** (`use_motion: true`) — velocity information captures signing dynamics and typically adds 5–8% accuracy.
-- **Use mixup** (`mixup_alpha: 0.2`) — regularizes training by interpolating between random sample pairs.
+- **Use mixup** (`mixup_alpha: 0.3`) — regularizes training by interpolating between random sample pairs.
 - **Enable TTA for evaluation** (`use_tta: true`) — averages predictions over original + horizontally flipped input for 2–4% evaluation boost.
 - **Use the error analysis notebook** (`notebooks/03_error_analysis.ipynb`) to find which classes are confused, then inspect those videos manually.
 - **Try the cosine scheduler** (`scheduler: cosine`) if onecycle doesn't converge well — cosine with warm-up is often more stable.

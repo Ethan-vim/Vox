@@ -459,8 +459,9 @@ def get_train_transforms(T: int = 64) -> Compose:
     """
     return Compose(
         [
-            TemporalSpeedPerturb(low=0.85, high=1.15),
+            TemporalSpeedPerturb(low=0.8, high=1.2),
             TemporalCrop(T=T),
+            TemporalFlip(p=0.3),
             KeypointHorizontalFlip(p=0.5, centered=True),
             KeypointRotation(max_angle=15, p=0.5),
             KeypointTranslation(max_shift=0.1, p=0.5),

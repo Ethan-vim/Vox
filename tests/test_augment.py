@@ -337,11 +337,11 @@ class TestPipelinePresets:
         r2 = pipeline(kps.copy())
         np.testing.assert_array_equal(r1, r2)
 
-    def test_train_has_no_temporal_flip(self):
-        """TemporalFlip should NOT be in the training pipeline."""
+    def test_train_has_temporal_flip(self):
+        """TemporalFlip should be in the training pipeline for regularization."""
         pipeline = get_train_transforms(T=32)
-        for t in pipeline.transforms:
-            assert not isinstance(t, TemporalFlip), "TemporalFlip should be removed"
+        has_flip = any(isinstance(t, TemporalFlip) for t in pipeline.transforms)
+        assert has_flip, "TemporalFlip should be in training pipeline"
 
     def test_train_noise_sigma_is_0_02(self):
         pipeline = get_train_transforms(T=32)

@@ -14,9 +14,9 @@ T: 64
 use_motion: true  # Concatenate velocity (frame differences) with position
 
 # Model architecture
-d_model: 256
-nhead: 8
-num_layers: 4
+d_model: 128
+nhead: 4
+num_layers: 3
 dropout: 0.3
 
 # Data loading
@@ -25,15 +25,15 @@ num_workers: 4              # parallel data-loading workers (0 = main process on
 # Training
 epochs: 100
 batch_size: 32
-lr: 1.0e-3
-weight_decay: 1.0e-4
+lr: 5.0e-4
+weight_decay: 0.01
 warmup_epochs: 10
 label_smoothing: 0.1
 grad_clip: 1.0
 fp16: true
 weighted_sampling: true  # important — classes are imbalanced
-early_stopping_patience: 20
-mixup_alpha: 0.2  # Mixup regularization (0 = disabled)
+early_stopping_patience: 15
+mixup_alpha: 0.3  # Mixup regularization (0 = disabled)
 
 # Scheduler
 scheduler: onecycle

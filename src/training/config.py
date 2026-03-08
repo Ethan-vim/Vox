@@ -40,9 +40,9 @@ class Config:
     backbone: str = "r2plus1d_18"
     num_keypoints: int = 543
     num_classes: int = 100
-    d_model: int = 256
-    nhead: int = 8
-    num_layers: int = 4
+    d_model: int = 128
+    nhead: int = 4
+    num_layers: int = 3
     dropout: float = 0.3
     pretrained: bool = True
 
@@ -57,14 +57,14 @@ class Config:
     epochs: int = 100
     batch_size: int = 32
     lr: float = 1e-4
-    weight_decay: float = 1e-4
+    weight_decay: float = 0.01
     warmup_epochs: int = 10
     label_smoothing: float = 0.1
     grad_clip: float = 1.0
     fp16: bool = True
     weighted_sampling: bool = False
-    early_stopping_patience: int = 20
-    mixup_alpha: float = 0.2  # Mixup interpolation parameter (0 = disabled)
+    early_stopping_patience: int = 15
+    mixup_alpha: float = 0.3  # Mixup interpolation parameter (0 = disabled)
 
     # --- Scheduler ---
     scheduler: str = "onecycle"  # onecycle or cosine
