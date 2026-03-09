@@ -11,6 +11,7 @@ from src.data.augment import (
     KeypointRotation,
     KeypointScale,
     KeypointTranslation,
+    KeypointYawRotation,
     TemporalCrop,
     TemporalFlip,
     TemporalSpeedPerturb,
@@ -242,6 +243,50 @@ class TestKeypointRotation:
 
 
 # ---------------------------------------------------------------------------
+# KeypointYawRotation
+# ---------------------------------------------------------------------------
+
+
+class TestKeypointYawRotation:
+    def test_p_zero_no_change(self):
+        kps = _kps(T=5)
+        result = KeypointYawRotation(p=0.0)(kps)
+        np.testing.assert_array_equal(result, kps)
+
+    def test_p_one_modifies_x_and_z(self):
+        kps = _kps(T=5)
+        np.random.seed(42)
+        result = KeypointYawRotation(max_angle=45, p=1.0)(kps)
+        # x and z should change; y should be untouched
+        assert not np.array_equal(result[:, :, 0], kps[:, :, 0])
+        np.testing.assert_array_equal(result[:, :, 1], kps[:, :, 1])
+
+    def test_y_unchanged(self):
+        kps = _kps(T=5)
+        np.random.seed(7)
+        result = KeypointYawRotation(max_angle=30, p=1.0)(kps)
+        np.testing.assert_array_equal(result[:, :, 1], kps[:, :, 1])
+
+    def test_preserves_xz_norm(self):
+        """Yaw rotation should preserve the L2 norm of (x, z) per point."""
+        kps = _kps(T=5)
+        np.random.seed(3)
+        result = KeypointYawRotation(max_angle=30, p=1.0)(kps)
+        orig = np.linalg.norm(kps[:, :, [0, 2]], axis=-1)
+        rot = np.linalg.norm(result[:, :, [0, 2]], axis=-1)
+        np.testing.assert_allclose(rot, orig, atol=1e-5)
+
+    def test_flat_input(self):
+        kps = _kps(T=5).reshape(5, NUM_KP * 3)
+        result = KeypointYawRotation(max_angle=15, p=1.0)(kps)
+        assert result.shape == kps.shape
+
+    def test_shape_preserved(self):
+        kps = _kps(T=10)
+        assert KeypointYawRotation()(kps).shape == kps.shape
+
+
+# ---------------------------------------------------------------------------
 # KeypointTranslation
 # ---------------------------------------------------------------------------
 
@@ -342,6 +387,11 @@ class TestPipelinePresets:
         pipeline = get_train_transforms(T=32)
         has_flip = any(isinstance(t, TemporalFlip) for t in pipeline.transforms)
         assert has_flip, "TemporalFlip should be in training pipeline"
+
+    def test_train_has_yaw_rotation(self):
+        pipeline = get_train_transforms(T=32)
+        has_yaw = any(isinstance(t, KeypointYawRotation) for t in pipeline.transforms)
+        assert has_yaw, "KeypointYawRotation should be in training pipeline"
 
     def test_train_noise_sigma_is_0_02(self):
         pipeline = get_train_transforms(T=32)

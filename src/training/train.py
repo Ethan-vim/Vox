@@ -18,6 +18,7 @@ import torch.nn as nn
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from src.data.augment import get_train_transforms, get_val_transforms
 from src.data.dataset import (
@@ -173,7 +174,7 @@ def train_one_epoch(
     total_top5 = 0.0
     num_batches = 0
 
-    pbar = tqdm(loader, desc=f"Train Epoch {epoch}", leave=False)
+    pbar = tqdm(loader, desc=f"Train Epoch {epoch}", leave=False, dynamic_ncols=True)
     for batch in pbar:
         if cfg.approach == "fusion":
             # WLASLFusionDataset returns (kp, video, label)
@@ -195,7 +196,8 @@ def train_one_epoch(
             )
 
         use_amp = cfg.fp16 and device.type == "cuda"
-        with torch.amp.autocast(device_type="cuda", enabled=use_amp):
+        autocast_device = "cuda" if device.type == "cuda" else "cpu"
+        with torch.amp.autocast(device_type=autocast_device, enabled=use_amp):
             if cfg.approach == "fusion":
                 logits = model(pose_input, video_input)
             else:
@@ -280,7 +282,7 @@ def validate(
     all_preds: list[int] = []
     all_targets: list[int] = []
 
-    for batch in tqdm(loader, desc="Validating", leave=False):
+    for batch in tqdm(loader, desc="Validating", leave=False, dynamic_ncols=True):
         if cfg.approach == "fusion":
             pose_input = batch[0].to(device, non_blocking=True)
             video_input = batch[1].to(device, non_blocking=True)
@@ -606,95 +608,96 @@ def main(cfg: Config) -> None:
 
     # Training loop
     epochs_without_improvement = 0
-    for epoch in range(start_epoch, cfg.epochs):
-        t0 = time.time()
+    with logging_redirect_tqdm():
+        for epoch in range(start_epoch, cfg.epochs):
+            t0 = time.time()
 
-        train_loss, train_top1, train_top5, global_step = train_one_epoch(
-            model, train_loader, optimizer, scheduler, scaler, criterion,
-            device, cfg, epoch=epoch, writer=writer, global_step=global_step,
-        )
-
-        val_loss, val_top1, val_top5, cm = validate(
-            model, val_loader, criterion, device, cfg,
-        )
-
-        elapsed = time.time() - t0
-
-        logger.info(
-            "Epoch %d/%d (%.1fs) | "
-            "Train Loss: %.4f Top1: %.1f%% Top5: %.1f%% | "
-            "Val Loss: %.4f Top1: %.1f%% Top5: %.1f%%",
-            epoch + 1, cfg.epochs, elapsed,
-            train_loss, train_top1, train_top5,
-            val_loss, val_top1, val_top5,
-        )
-
-        # TensorBoard epoch-level logging
-        if writer is not None:
-            writer.add_scalar("train/loss_epoch", train_loss, epoch)
-            writer.add_scalar("train/top1_epoch", train_top1, epoch)
-            writer.add_scalar("train/top5_epoch", train_top5, epoch)
-            writer.add_scalar("val/loss_epoch", val_loss, epoch)
-            writer.add_scalar("val/top1_epoch", val_top1, epoch)
-            writer.add_scalar("val/top5_epoch", val_top5, epoch)
-
-        # W&B logging
-        if cfg.use_wandb:
-            import wandb
-
-            wandb.log(
-                {
-                    "epoch": epoch,
-                    "train/loss": train_loss,
-                    "train/top1": train_top1,
-                    "train/top5": train_top5,
-                    "val/loss": val_loss,
-                    "val/top1": val_top1,
-                    "val/top5": val_top5,
-                },
-                step=global_step,
+            train_loss, train_top1, train_top5, global_step = train_one_epoch(
+                model, train_loader, optimizer, scheduler, scaler, criterion,
+                device, cfg, epoch=epoch, writer=writer, global_step=global_step,
             )
 
-        # Save best checkpoint
-        is_best = val_top1 > best_top1
-        if is_best:
-            best_top1 = val_top1
-            epochs_without_improvement = 0
-            ckpt = {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
-                "best_top1": best_top1,
-                "global_step": global_step,
-                "config": vars(cfg) if hasattr(cfg, "__dict__") else {},
-            }
-            best_path = checkpoint_dir / "best_model.pt"
-            torch.save(ckpt, str(best_path))
-            logger.info("Saved best model (Top1: %.1f%%) to %s", best_top1, best_path)
-        else:
-            epochs_without_improvement += 1
+            val_loss, val_top1, val_top5, cm = validate(
+                model, val_loader, criterion, device, cfg,
+            )
 
-        # Save periodic checkpoint
-        if (epoch + 1) % 10 == 0 or epoch == cfg.epochs - 1:
-            ckpt = {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
-                "best_top1": best_top1,
-                "global_step": global_step,
-            }
-            periodic_path = checkpoint_dir / f"checkpoint_epoch_{epoch + 1}.pt"
-            torch.save(ckpt, str(periodic_path))
+            elapsed = time.time() - t0
 
-        # Early stopping
-        if cfg.early_stopping_patience > 0 and epochs_without_improvement >= cfg.early_stopping_patience:
             logger.info(
-                "Early stopping after %d epochs without improvement",
-                cfg.early_stopping_patience,
+                "Epoch %d/%d (%.1fs) | "
+                "Train Loss: %.4f Top1: %.1f%% Top5: %.1f%% | "
+                "Val Loss: %.4f Top1: %.1f%% Top5: %.1f%%",
+                epoch + 1, cfg.epochs, elapsed,
+                train_loss, train_top1, train_top5,
+                val_loss, val_top1, val_top5,
             )
-            break
+
+            # TensorBoard epoch-level logging
+            if writer is not None:
+                writer.add_scalar("train/loss_epoch", train_loss, epoch)
+                writer.add_scalar("train/top1_epoch", train_top1, epoch)
+                writer.add_scalar("train/top5_epoch", train_top5, epoch)
+                writer.add_scalar("val/loss_epoch", val_loss, epoch)
+                writer.add_scalar("val/top1_epoch", val_top1, epoch)
+                writer.add_scalar("val/top5_epoch", val_top5, epoch)
+
+            # W&B logging
+            if cfg.use_wandb:
+                import wandb
+
+                wandb.log(
+                    {
+                        "epoch": epoch,
+                        "train/loss": train_loss,
+                        "train/top1": train_top1,
+                        "train/top5": train_top5,
+                        "val/loss": val_loss,
+                        "val/top1": val_top1,
+                        "val/top5": val_top5,
+                    },
+                    step=global_step,
+                )
+
+            # Save best checkpoint
+            is_best = val_top1 > best_top1
+            if is_best:
+                best_top1 = val_top1
+                epochs_without_improvement = 0
+                ckpt = {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
+                    "best_top1": best_top1,
+                    "global_step": global_step,
+                    "config": vars(cfg) if hasattr(cfg, "__dict__") else {},
+                }
+                best_path = checkpoint_dir / "best_model.pt"
+                torch.save(ckpt, str(best_path))
+                logger.info("Saved best model (Top1: %.1f%%) to %s", best_top1, best_path)
+            else:
+                epochs_without_improvement += 1
+
+            # Save periodic checkpoint
+            if (epoch + 1) % 10 == 0 or epoch == cfg.epochs - 1:
+                ckpt = {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
+                    "best_top1": best_top1,
+                    "global_step": global_step,
+                }
+                periodic_path = checkpoint_dir / f"checkpoint_epoch_{epoch + 1}.pt"
+                torch.save(ckpt, str(periodic_path))
+
+            # Early stopping
+            if cfg.early_stopping_patience > 0 and epochs_without_improvement >= cfg.early_stopping_patience:
+                logger.info(
+                    "Early stopping after %d epochs without improvement",
+                    cfg.early_stopping_patience,
+                )
+                break
 
     logger.info("Training complete. Best validation Top-1: %.1f%%", best_top1)
 

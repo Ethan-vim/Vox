@@ -43,7 +43,7 @@ class Config:
     d_model: int = 128
     nhead: int = 4
     num_layers: int = 3
-    dropout: float = 0.3
+    dropout: float = 0.5
     pretrained: bool = True
 
     # Fusion-specific
@@ -56,15 +56,15 @@ class Config:
     # --- Training ---
     epochs: int = 100
     batch_size: int = 32
-    lr: float = 1e-4
-    weight_decay: float = 0.01
+    lr: float = 3e-4
+    weight_decay: float = 1e-3
     warmup_epochs: int = 10
-    label_smoothing: float = 0.1
+    label_smoothing: float = 0.05
     grad_clip: float = 1.0
     fp16: bool = True
     weighted_sampling: bool = False
     early_stopping_patience: int = 15
-    mixup_alpha: float = 0.3  # Mixup interpolation parameter (0 = disabled)
+    mixup_alpha: float = 0.4  # Mixup interpolation parameter (0 = disabled)
 
     # --- Scheduler ---
     scheduler: str = "onecycle"  # onecycle or cosine
@@ -89,10 +89,26 @@ class Config:
     resume_checkpoint: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Derive num_classes from wlasl_variant for all standard variants."""
+        """Derive num_classes and model architecture from wlasl_variant.
+
+        Smaller subsets use fewer transformer parameters to avoid overfitting;
+        larger subsets scale up for capacity.
+        """
         variant_to_classes = {100: 100, 300: 300, 1000: 1000, 2000: 2000}
         if self.wlasl_variant in variant_to_classes:
             self.num_classes = variant_to_classes[self.wlasl_variant]
+
+        variant_to_arch = {
+            100:  {"d_model": 64, "nhead": 4, "num_layers": 1},
+            300:  {"d_model": 192, "nhead": 6, "num_layers": 4},
+            1000: {"d_model": 256, "nhead": 8, "num_layers": 5},
+            2000: {"d_model": 384, "nhead": 8, "num_layers": 6},
+        }
+        if self.wlasl_variant in variant_to_arch:
+            arch = variant_to_arch[self.wlasl_variant]
+            self.d_model = arch["d_model"]
+            self.nhead = arch["nhead"]
+            self.num_layers = arch["num_layers"]
 
 
 def load_config(path: str | Path) -> Config:

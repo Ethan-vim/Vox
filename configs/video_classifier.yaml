@@ -9,11 +9,11 @@ wlasl_variant: 100
 # num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
 
 # Temporal & spatial
-T: 32                     # video models are memory-heavy, keep T lower
+T: 64                     # higher temporal resolution for better sign recognition
 image_size: 224            # reduce to 112 if GPU memory is tight
 
 # Model
-dropout: 0.3
+dropout: 0.5
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
@@ -22,9 +22,9 @@ num_workers: 4              # parallel data-loading workers (0 = main process on
 epochs: 100
 batch_size: 8              # 3D CNNs need small batches
 lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-weight_decay: 0.01
+weight_decay: 1.0e-3
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.05
 grad_clip: 1.0
 fp16: true                 # essential for video models
 weighted_sampling: false
@@ -41,7 +41,7 @@ log_interval: 10
 # Inference
 confidence_threshold: 0.6
 smoothing_window: 5
-buffer_size: 32
+buffer_size: 64
 fps_display: true
 
 # Paths

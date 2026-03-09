@@ -147,53 +147,56 @@ class TestDetermineTier:
 class TestBuildConfigValues:
     def test_pose_mid_100(self, cuda_hw):
         cfg = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
-        assert cfg["approach"] == "pose_transformer"
+        assert cfg["approach"] == "pose_bilstm"
         assert cfg["batch_size"] == 32
         assert cfg["T"] == 64
         assert cfg["fp16"] is True
         assert cfg["wlasl_variant"] == 100
-        assert cfg["d_model"] == 128
-        assert cfg["num_layers"] == 3
+        assert cfg["d_model"] == 64
+        assert cfg["num_layers"] == 1
 
     def test_pose_cpu_100(self, cpu_hw):
         cfg = auto_config.build_config_values("pose", 100, "cpu", cpu_hw)
         assert cfg["batch_size"] == 8
-        assert cfg["T"] == 32
+        assert cfg["T"] == 64
         assert cfg["fp16"] is False
         assert cfg["num_workers"] == 2
 
     def test_pose_high_300(self, high_cuda_hw):
         cfg = auto_config.build_config_values("pose", 300, "high", high_cuda_hw)
         assert cfg["batch_size"] == 64
-        assert cfg["num_layers"] == 6
+        assert cfg["d_model"] == 192
+        assert cfg["nhead"] == 6
+        assert cfg["num_layers"] == 4
         assert cfg["scheduler"] == "cosine"
         assert cfg["epochs"] == 150
 
     def test_pose_1000(self, cuda_hw):
         cfg = auto_config.build_config_values("pose", 1000, "mid", cuda_hw)
-        assert cfg["d_model"] == 384
-        assert cfg["num_layers"] == 6
+        assert cfg["d_model"] == 256
+        assert cfg["nhead"] == 8
+        assert cfg["num_layers"] == 5
         assert cfg["epochs"] == 200
 
     def test_video_mid_100(self, cuda_hw):
         cfg = auto_config.build_config_values("video", 100, "mid", cuda_hw)
         assert cfg["approach"] == "video"
         assert cfg["batch_size"] == 8
-        assert cfg["T"] == 32
+        assert cfg["T"] == 64
         assert cfg["image_size"] == 224
         assert cfg["fp16"] is True
 
     def test_video_low_100(self, low_cuda_hw):
         cfg = auto_config.build_config_values("video", 100, "low", low_cuda_hw)
         assert cfg["batch_size"] == 4
-        assert cfg["T"] == 16
+        assert cfg["T"] == 48
         assert cfg["image_size"] == 112
 
     def test_fusion_cpu(self, cpu_hw):
         cfg = auto_config.build_config_values("fusion", 100, "cpu", cpu_hw)
         assert cfg["approach"] == "fusion"
         assert cfg["batch_size"] == 4
-        assert cfg["T"] == 32
+        assert cfg["T"] == 48
         assert cfg["image_size"] == 112
         assert cfg["fp16"] is False
 
@@ -230,7 +233,7 @@ class TestRenderYaml:
         content = auto_config.render_yaml("pose", values, cuda_hw, "mid")
         parsed = yaml.safe_load(content)
         assert isinstance(parsed, dict)
-        assert parsed["approach"] == "pose_transformer"
+        assert parsed["approach"] == "pose_bilstm"
 
     def test_header_present(self, cuda_hw):
         values = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
@@ -293,7 +296,7 @@ class TestMainDryRun:
         )
         assert result.returncode == 0
         assert "WLASL Auto-Config" in result.stdout
-        assert "approach: pose_transformer" in result.stdout
+        assert "approach: pose_bilstm" in result.stdout
 
     def test_dry_run_video(self):
         result = subprocess.run(
@@ -331,4 +334,4 @@ class TestMainDryRun:
         assert result.returncode == 0
         assert out.exists()
         parsed = yaml.safe_load(out.read_text())
-        assert parsed["approach"] == "pose_transformer"
+        assert parsed["approach"] == "pose_bilstm"

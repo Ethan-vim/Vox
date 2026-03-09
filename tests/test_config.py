@@ -25,6 +25,27 @@ class TestConfigDefaults:
         cfg = Config(wlasl_variant=100, num_classes=999)
         assert cfg.num_classes == 100
 
+    def test_variant_scales_model_architecture(self):
+        cfg100 = Config(wlasl_variant=100)
+        assert cfg100.d_model == 64
+        assert cfg100.nhead == 4
+        assert cfg100.num_layers == 1
+
+        cfg300 = Config(wlasl_variant=300)
+        assert cfg300.d_model == 192
+        assert cfg300.nhead == 6
+        assert cfg300.num_layers == 4
+
+        cfg1000 = Config(wlasl_variant=1000)
+        assert cfg1000.d_model == 256
+        assert cfg1000.nhead == 8
+        assert cfg1000.num_layers == 5
+
+        cfg2000 = Config(wlasl_variant=2000)
+        assert cfg2000.d_model == 384
+        assert cfg2000.nhead == 8
+        assert cfg2000.num_layers == 6
+
     def test_new_fields_exist(self):
         cfg = Config()
         assert hasattr(cfg, "use_motion")
@@ -37,7 +58,7 @@ class TestConfigDefaults:
 
     def test_mixup_alpha_default(self):
         cfg = Config()
-        assert cfg.mixup_alpha == 0.3
+        assert cfg.mixup_alpha == 0.4
 
     def test_use_tta_default(self):
         cfg = Config()
@@ -75,12 +96,13 @@ class TestLoadConfig:
 
 class TestSaveConfig:
     def test_roundtrip(self, tmp_path):
-        cfg = Config(T=16, d_model=128, use_motion=True, mixup_alpha=0.5)
+        # wlasl_variant=300 → __post_init__ sets d_model=192; verify roundtrip preserves it
+        cfg = Config(T=16, wlasl_variant=300, use_motion=True, mixup_alpha=0.5)
         out = tmp_path / "saved.yaml"
         save_config(cfg, out)
         loaded = load_config(out)
         assert loaded.T == 16
-        assert loaded.d_model == 128
+        assert loaded.d_model == 192
         assert loaded.use_motion is True
         assert loaded.mixup_alpha == 0.5
 

@@ -70,6 +70,15 @@ class TestNormalizeKeypoints:
         normalize_keypoints(kps)
         np.testing.assert_array_equal(kps, original)
 
+    def test_hand_landmarks_relative_to_wrist(self):
+        """Hand landmarks should be relative to their wrist after normalization."""
+        kps = self._make_kps(T=10)
+        result = normalize_keypoints(kps)
+        # Left hand wrist (index 33) should be at origin in hand-local coords
+        np.testing.assert_allclose(result[:, 33, :], 0.0, atol=1e-5)
+        # Right hand wrist (index 54) should be at origin in hand-local coords
+        np.testing.assert_allclose(result[:, 54, :], 0.0, atol=1e-5)
+
 
 # ---------------------------------------------------------------------------
 # parse_wlasl_annotations

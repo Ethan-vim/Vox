@@ -31,7 +31,7 @@ POSE_TRANSFORMER_YAML = """\
 ## Recommended starting configuration (WLASL100).
 ## Values from README.md "Recommended Configurations" section.
 
-approach: pose_transformer
+approach: pose_bilstm
 wlasl_variant: 100
 # num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
 num_keypoints: 543
@@ -43,10 +43,10 @@ T: 64
 use_motion: true  # Concatenate velocity (frame differences) with position
 
 # Model architecture
-d_model: 128
+d_model: 64
 nhead: 4
-num_layers: 3
-dropout: 0.3
+num_layers: 1
+dropout: 0.6
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
@@ -54,15 +54,15 @@ num_workers: 4              # parallel data-loading workers (0 = main process on
 # Training
 epochs: 100
 batch_size: 32
-lr: 5.0e-4
-weight_decay: 0.01
+lr: 3.0e-4
+weight_decay: 1.0e-3
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.05
 grad_clip: 1.0
 fp16: true
 weighted_sampling: true  # important — classes are imbalanced
 early_stopping_patience: 15
-mixup_alpha: 0.3  # Mixup regularization (0 = disabled)
+mixup_alpha: 0.4  # Mixup regularization (0 = disabled)
 
 # Scheduler
 scheduler: onecycle
@@ -100,11 +100,11 @@ wlasl_variant: 100
 # num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
 
 # Temporal & spatial
-T: 32                     # video models are memory-heavy, keep T lower
+T: 64                     # higher temporal resolution for better sign recognition
 image_size: 224            # reduce to 112 if GPU memory is tight
 
 # Model
-dropout: 0.3
+dropout: 0.5
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
@@ -113,9 +113,9 @@ num_workers: 4              # parallel data-loading workers (0 = main process on
 epochs: 100
 batch_size: 8              # 3D CNNs need small batches
 lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-weight_decay: 0.01
+weight_decay: 1.0e-3
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.05
 grad_clip: 1.0
 fp16: true                 # essential for video models
 weighted_sampling: false
@@ -132,7 +132,7 @@ log_interval: 10
 # Inference
 confidence_threshold: 0.6
 smoothing_window: 5
-buffer_size: 32
+buffer_size: 64
 fps_display: true
 
 # Paths
@@ -166,7 +166,7 @@ image_size: 224
 d_model: 128
 nhead: 4
 num_layers: 3
-dropout: 0.3
+dropout: 0.5
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
@@ -175,9 +175,9 @@ num_workers: 4              # parallel data-loading workers (0 = main process on
 epochs: 100
 batch_size: 8
 lr: 1.0e-4
-weight_decay: 0.01
+weight_decay: 1.0e-3
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.05
 grad_clip: 1.0
 fp16: true
 weighted_sampling: false

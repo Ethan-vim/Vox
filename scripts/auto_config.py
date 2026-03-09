@@ -195,18 +195,18 @@ def build_config_values(
             "d_model": 128,
             "nhead": 4,
             "num_layers": 3,
-            "dropout": 0.3,
+            "dropout": 0.5,
             "num_workers": 4,
             "batch_size": 32,
-            "lr": 5e-4,
-            "weight_decay": 0.01,
+            "lr": 3e-4,
+            "weight_decay": 1e-3,
             "warmup_epochs": 10,
-            "label_smoothing": 0.1,
+            "label_smoothing": 0.05,
             "grad_clip": 1.0,
             "fp16": True,
             "weighted_sampling": True,
             "early_stopping_patience": 15,
-            "mixup_alpha": 0.3,
+            "mixup_alpha": 0.4,
             "scheduler": "onecycle",
             "epochs": 100,
             "use_tta": False,
@@ -217,15 +217,15 @@ def build_config_values(
             "backbone": "r2plus1d_18",
             "pretrained": True,
             "wlasl_variant": variant,
-            "T": 32,
+            "T": 64,
             "image_size": 224,
-            "dropout": 0.3,
+            "dropout": 0.5,
             "num_workers": 4,
             "batch_size": 8,
             "lr": 1e-4,
-            "weight_decay": 0.01,
+            "weight_decay": 1e-3,
             "warmup_epochs": 10,
-            "label_smoothing": 0.1,
+            "label_smoothing": 0.05,
             "grad_clip": 1.0,
             "fp16": True,
             "weighted_sampling": False,
@@ -247,13 +247,13 @@ def build_config_values(
             "d_model": 128,
             "nhead": 4,
             "num_layers": 3,
-            "dropout": 0.3,
+            "dropout": 0.5,
             "num_workers": 4,
             "batch_size": 8,
             "lr": 1e-4,
-            "weight_decay": 0.01,
+            "weight_decay": 1e-3,
             "warmup_epochs": 10,
-            "label_smoothing": 0.1,
+            "label_smoothing": 0.05,
             "grad_clip": 1.0,
             "fp16": True,
             "weighted_sampling": False,
@@ -263,22 +263,44 @@ def build_config_values(
         }
 
     # --- Variant-specific overrides (pose approach) ---
+    # WLASL100: ~6-8 samples/class → use BiLSTM + aggressive regularization.
+    # Larger subsets scale up transformer capacity and relax dropout.
     if approach == "pose":
-        if variant == 300:
+        if variant == 100:
             cfg.update({
-                "num_layers": 6,
-                "dropout": 0.25,
-                "lr": 5e-4,
+                "approach": "pose_bilstm",
+                "d_model": 64,
+                "nhead": 4,
+                "num_layers": 1,
+                "dropout": 0.6,
+            })
+        elif variant == 300:
+            cfg.update({
+                "d_model": 192,
+                "nhead": 6,
+                "num_layers": 4,
+                "dropout": 0.35,
                 "scheduler": "cosine",
                 "early_stopping_patience": 25,
                 "epochs": 150,
             })
-        elif variant >= 1000:
+        elif variant == 1000:
+            cfg.update({
+                "d_model": 256,
+                "nhead": 8,
+                "num_layers": 5,
+                "dropout": 0.25,
+                "scheduler": "cosine",
+                "warmup_epochs": 15,
+                "early_stopping_patience": 30,
+                "epochs": 200,
+            })
+        elif variant >= 2000:
             cfg.update({
                 "d_model": 384,
+                "nhead": 8,
                 "num_layers": 6,
                 "dropout": 0.2,
-                "lr": 5e-4,
                 "scheduler": "cosine",
                 "warmup_epochs": 15,
                 "early_stopping_patience": 30,
@@ -292,6 +314,15 @@ def build_config_values(
     if approach in ("video", "fusion") and variant >= 1000:
         cfg["epochs"] = 200
         cfg["early_stopping_patience"] = 30
+
+    # Scale fusion sub-model architecture with variant
+    if approach == "fusion":
+        if variant == 300:
+            cfg.update({"d_model": 192, "nhead": 6, "num_layers": 4})
+        elif variant == 1000:
+            cfg.update({"d_model": 256, "nhead": 8, "num_layers": 5})
+        elif variant >= 2000:
+            cfg.update({"d_model": 384, "nhead": 8, "num_layers": 6})
 
     # --- Tier-specific overrides (hardware-dependent) ---
     tier_overrides = _get_tier_overrides(approach, tier, hw)
@@ -323,19 +354,19 @@ def _get_tier_overrides(approach: str, tier: str, hw: HardwareInfo) -> dict:
 
     if approach == "pose":
         batch_map = {"high": 64, "mid": 32, "low": 16, "cpu": 8}
-        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 32}
+        t_map = {"high": 64, "mid": 64, "low": 64, "cpu": 64}
         overrides["batch_size"] = batch_map[tier]
         overrides["T"] = t_map[tier]
     elif approach == "video":
         batch_map = {"high": 16, "mid": 8, "low": 4, "cpu": 4}
-        t_map = {"high": 32, "mid": 32, "low": 16, "cpu": 16}
+        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 32}
         img_map = {"high": 224, "mid": 224, "low": 112, "cpu": 112}
         overrides["batch_size"] = batch_map[tier]
         overrides["T"] = t_map[tier]
         overrides["image_size"] = img_map[tier]
     else:  # fusion
         batch_map = {"high": 16, "mid": 8, "low": 4, "cpu": 4}
-        t_map = {"high": 64, "mid": 64, "low": 32, "cpu": 32}
+        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 48}
         img_map = {"high": 224, "mid": 224, "low": 112, "cpu": 112}
         overrides["batch_size"] = batch_map[tier]
         overrides["T"] = t_map[tier]
