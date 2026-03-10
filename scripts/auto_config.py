@@ -192,23 +192,23 @@ def build_config_values(
             "num_keypoints": 543,
             "T": 64,
             "use_motion": True,
-            "d_model": 256,
-            "nhead": 8,
-            "num_layers": 4,
-            "dropout": 0.3,
+            "d_model": 128,
+            "nhead": 4,
+            "num_layers": 2,
+            "dropout": 0.1,
             "num_workers": 4,
             "batch_size": 32,
-            "lr": 1e-3,
-            "weight_decay": 1e-4,
-            "warmup_epochs": 10,
-            "label_smoothing": 0.1,
+            "lr": 3e-4,
+            "weight_decay": 5e-4,
+            "warmup_epochs": 15,
+            "label_smoothing": 0.0,
             "grad_clip": 1.0,
             "fp16": True,
             "weighted_sampling": True,
-            "early_stopping_patience": 20,
-            "mixup_alpha": 0.2,
-            "scheduler": "onecycle",
-            "epochs": 100,
+            "early_stopping_patience": 50,
+            "mixup_alpha": 0.15,
+            "scheduler": "cosine",
+            "epochs": 250,
             "use_tta": False,
         }
     elif approach == "video":
@@ -217,21 +217,21 @@ def build_config_values(
             "backbone": "r2plus1d_18",
             "pretrained": True,
             "wlasl_variant": variant,
-            "T": 32,
+            "T": 64,
             "image_size": 224,
-            "dropout": 0.4,
+            "dropout": 0.3,
             "num_workers": 4,
             "batch_size": 8,
             "lr": 1e-4,
-            "weight_decay": 1e-4,
+            "weight_decay": 5e-4,
             "warmup_epochs": 10,
-            "label_smoothing": 0.1,
+            "label_smoothing": 0.0,
             "grad_clip": 1.0,
             "fp16": True,
             "weighted_sampling": False,
-            "early_stopping_patience": 20,
-            "scheduler": "onecycle",
-            "epochs": 100,
+            "early_stopping_patience": 40,
+            "scheduler": "cosine",
+            "epochs": 250,
         }
     else:  # fusion
         cfg = {
@@ -244,54 +244,78 @@ def build_config_values(
             "wlasl_variant": variant,
             "T": 64,
             "image_size": 224,
-            "d_model": 256,
-            "nhead": 8,
-            "num_layers": 4,
-            "dropout": 0.3,
+            "d_model": 128,
+            "nhead": 4,
+            "num_layers": 2,
+            "dropout": 0.1,
             "num_workers": 4,
             "batch_size": 8,
             "lr": 1e-4,
-            "weight_decay": 1e-4,
+            "weight_decay": 5e-4,
             "warmup_epochs": 10,
-            "label_smoothing": 0.1,
+            "label_smoothing": 0.0,
             "grad_clip": 1.0,
             "fp16": True,
             "weighted_sampling": False,
-            "early_stopping_patience": 20,
-            "scheduler": "onecycle",
-            "epochs": 100,
+            "early_stopping_patience": 40,
+            "mixup_alpha": 0.1,
+            "scheduler": "cosine",
+            "epochs": 250,
         }
 
     # --- Variant-specific overrides (pose approach) ---
+    # Architecture and dropout must scale together — a tiny model with high
+    # dropout has so much gradient noise that the loss never decreases.
+    # These values match Config.__post_init__ in src/training/config.py.
     if approach == "pose":
-        if variant == 300:
+        if variant == 100:
             cfg.update({
-                "num_layers": 6,
-                "dropout": 0.25,
-                "lr": 5e-4,
-                "scheduler": "cosine",
-                "early_stopping_patience": 25,
-                "epochs": 150,
+                "d_model": 128,
+                "nhead": 4,
+                "num_layers": 2,
+                "dropout": 0.1,
             })
-        elif variant >= 1000:
+        elif variant == 300:
+            cfg.update({
+                "d_model": 192,
+                "nhead": 6,
+                "num_layers": 4,
+                "dropout": 0.3,
+                "epochs": 300,
+            })
+        elif variant == 1000:
+            cfg.update({
+                "d_model": 256,
+                "nhead": 8,
+                "num_layers": 5,
+                "dropout": 0.4,
+                "epochs": 350,
+            })
+        elif variant >= 2000:
             cfg.update({
                 "d_model": 384,
+                "nhead": 8,
                 "num_layers": 6,
-                "dropout": 0.2,
-                "lr": 5e-4,
-                "scheduler": "cosine",
-                "warmup_epochs": 15,
-                "early_stopping_patience": 30,
-                "epochs": 200,
+                "dropout": 0.5,
+                "epochs": 400,
             })
 
     # --- Variant-specific overrides (video/fusion) ---
     if approach in ("video", "fusion") and variant >= 300:
-        cfg["epochs"] = 150
-        cfg["early_stopping_patience"] = 25
+        cfg["epochs"] = 300
     if approach in ("video", "fusion") and variant >= 1000:
-        cfg["epochs"] = 200
-        cfg["early_stopping_patience"] = 30
+        cfg["epochs"] = 350
+    if approach in ("video", "fusion") and variant >= 2000:
+        cfg["epochs"] = 400
+
+    # Scale fusion sub-model architecture with variant (matches Config.__post_init__)
+    if approach == "fusion":
+        if variant == 300:
+            cfg.update({"d_model": 192, "nhead": 6, "num_layers": 4, "dropout": 0.3})
+        elif variant == 1000:
+            cfg.update({"d_model": 256, "nhead": 8, "num_layers": 5, "dropout": 0.4})
+        elif variant >= 2000:
+            cfg.update({"d_model": 384, "nhead": 8, "num_layers": 6, "dropout": 0.5})
 
     # --- Tier-specific overrides (hardware-dependent) ---
     tier_overrides = _get_tier_overrides(approach, tier, hw)
@@ -323,19 +347,19 @@ def _get_tier_overrides(approach: str, tier: str, hw: HardwareInfo) -> dict:
 
     if approach == "pose":
         batch_map = {"high": 64, "mid": 32, "low": 16, "cpu": 8}
-        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 32}
+        t_map = {"high": 64, "mid": 64, "low": 64, "cpu": 64}
         overrides["batch_size"] = batch_map[tier]
         overrides["T"] = t_map[tier]
     elif approach == "video":
         batch_map = {"high": 16, "mid": 8, "low": 4, "cpu": 4}
-        t_map = {"high": 32, "mid": 32, "low": 16, "cpu": 16}
+        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 32}
         img_map = {"high": 224, "mid": 224, "low": 112, "cpu": 112}
         overrides["batch_size"] = batch_map[tier]
         overrides["T"] = t_map[tier]
         overrides["image_size"] = img_map[tier]
     else:  # fusion
         batch_map = {"high": 16, "mid": 8, "low": 4, "cpu": 4}
-        t_map = {"high": 64, "mid": 64, "low": 32, "cpu": 32}
+        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 48}
         img_map = {"high": 224, "mid": 224, "low": 112, "cpu": 112}
         overrides["batch_size"] = batch_map[tier]
         overrides["T"] = t_map[tier]
@@ -541,6 +565,7 @@ grad_clip: {values['grad_clip']}
 fp16: {_bool(values['fp16'])}
 weighted_sampling: {_bool(values['weighted_sampling'])}
 early_stopping_patience: {values['early_stopping_patience']}
+mixup_alpha: {values['mixup_alpha']}
 
 # Scheduler
 scheduler: {values['scheduler']}

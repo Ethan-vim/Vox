@@ -1,6 +1,6 @@
 ## Approach B: RGB Video Classifier
-## Uses pretrained 3D CNN backbones (R(2+1)D, R3D, SlowFast, etc.)
-## Values from README.md "Recommended Configurations" section.
+## Optimized for lowest possible loss on WLASL100.
+## Hardware: RTX 4080 (16 GB VRAM)
 
 approach: video
 backbone: r2plus1d_18
@@ -9,29 +9,29 @@ wlasl_variant: 100
 # num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
 
 # Temporal & spatial
-T: 32                     # video models are memory-heavy, keep T lower
-image_size: 224            # reduce to 112 if GPU memory is tight
+T: 64
+image_size: 224
 
 # Model
-dropout: 0.4
+dropout: 0.3                # video backbones need moderate dropout (not auto-scaled)
 
 # Data loading
-num_workers: 4              # parallel data-loading workers (0 = main process only)
+num_workers: 8
 
 # Training
-epochs: 100
-batch_size: 8              # 3D CNNs need small batches
-lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-weight_decay: 1.0e-4
+epochs: 250
+batch_size: 8               # 3D CNNs need small batches
+lr: 1.0e-4                  # lower LR for finetuning pretrained backbone
+weight_decay: 5.0e-4
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.0        # removed — was artificially flooring loss
 grad_clip: 1.0
-fp16: true                 # essential for video models
+fp16: true                  # essential for video models
 weighted_sampling: false
-early_stopping_patience: 20
+early_stopping_patience: 40
 
 # Scheduler
-scheduler: onecycle
+scheduler: cosine
 
 # Logging
 use_wandb: false
@@ -41,11 +41,11 @@ log_interval: 10
 # Inference
 confidence_threshold: 0.6
 smoothing_window: 5
-buffer_size: 32
+buffer_size: 64
 fps_display: true
 
 # Paths
 data_dir: data
 output_dir: outputs
-checkpoint_dir: checkpoints
-log_dir: logs
+checkpoint_dir: checkpoints/video
+log_dir: logs/video

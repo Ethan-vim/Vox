@@ -71,7 +71,7 @@ def tmp_config_yaml(tmp_path):
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
         "approach: pose_transformer\n"
-        "wlasl_variant: 100\n"
+        "wlasl_variant: 10\n"
         "T: 16\n"
         "d_model: 64\n"
         "nhead: 4\n"

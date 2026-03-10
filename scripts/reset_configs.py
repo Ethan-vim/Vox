@@ -28,8 +28,9 @@ CONFIGS_DIR = PROJECT_ROOT / "configs"
 
 POSE_TRANSFORMER_YAML = """\
 ## Approach A: Pose/Keypoint Transformer
-## Recommended starting configuration (WLASL100).
-## Values from README.md "Recommended Configurations" section.
+## Optimized configuration (WLASL100).
+## Note: d_model, nhead, num_layers, dropout are auto-scaled per variant
+## by Config.__post_init__ — values here match the WLASL100 defaults.
 
 approach: pose_transformer
 wlasl_variant: 100
@@ -42,30 +43,30 @@ T: 64
 # Features
 use_motion: true  # Concatenate velocity (frame differences) with position
 
-# Model architecture
-d_model: 256
-nhead: 8
-num_layers: 4
-dropout: 0.3
+# Model architecture (auto-scaled by __post_init__ for the variant)
+d_model: 128
+nhead: 4
+num_layers: 2
+dropout: 0.1
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
 
 # Training
-epochs: 100
+epochs: 250
 batch_size: 32
-lr: 1.0e-3
-weight_decay: 1.0e-4
-warmup_epochs: 10
-label_smoothing: 0.1
+lr: 3.0e-4
+weight_decay: 5.0e-4
+warmup_epochs: 15
+label_smoothing: 0.0
 grad_clip: 1.0
 fp16: true
 weighted_sampling: true  # important — classes are imbalanced
-early_stopping_patience: 20
-mixup_alpha: 0.2  # Mixup regularization (0 = disabled)
+early_stopping_patience: 50
+mixup_alpha: 0.15  # Light mixup for diversity without flooring loss
 
 # Scheduler
-scheduler: onecycle
+scheduler: cosine
 
 # Evaluation
 use_tta: false  # Test-time augmentation (horizontal flip averaging)
@@ -91,7 +92,7 @@ log_dir: logs
 VIDEO_CLASSIFIER_YAML = """\
 ## Approach B: RGB Video Classifier
 ## Uses pretrained 3D CNN backbones (R(2+1)D, R3D, SlowFast, etc.)
-## Values from README.md "Recommended Configurations" section.
+## Optimized configuration (WLASL100).
 
 approach: video
 backbone: r2plus1d_18
@@ -100,29 +101,29 @@ wlasl_variant: 100
 # num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
 
 # Temporal & spatial
-T: 32                     # video models are memory-heavy, keep T lower
+T: 64                     # higher temporal resolution for better sign recognition
 image_size: 224            # reduce to 112 if GPU memory is tight
 
 # Model
-dropout: 0.4
+dropout: 0.3               # video backbones need moderate dropout (not auto-scaled)
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
 
 # Training
-epochs: 100
+epochs: 250
 batch_size: 8              # 3D CNNs need small batches
 lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-weight_decay: 1.0e-4
+weight_decay: 5.0e-4
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.0
 grad_clip: 1.0
 fp16: true                 # essential for video models
 weighted_sampling: false
-early_stopping_patience: 20
+early_stopping_patience: 40
 
 # Scheduler
-scheduler: onecycle
+scheduler: cosine
 
 # Logging
 use_wandb: false
@@ -132,7 +133,7 @@ log_interval: 10
 # Inference
 confidence_threshold: 0.6
 smoothing_window: 5
-buffer_size: 32
+buffer_size: 64
 fps_display: true
 
 # Paths
@@ -145,7 +146,7 @@ log_dir: logs
 FUSION_YAML = """\
 ## Approach C: Hybrid Fusion (Pose + Video)
 ## Combines Approach A and B for best accuracy.
-## Values from README.md "Recommended Configurations" section.
+## Optimized configuration (WLASL100).
 
 approach: fusion
 fusion: concat             # start with concat, try attention if concat plateaus
@@ -162,29 +163,30 @@ wlasl_variant: 100
 T: 64
 image_size: 224
 
-# Pose Transformer settings
-d_model: 256
-nhead: 8
-num_layers: 4
-dropout: 0.3
+# Pose Transformer settings (auto-scaled by __post_init__ for the variant)
+d_model: 128
+nhead: 4
+num_layers: 2
+dropout: 0.1
 
 # Data loading
 num_workers: 4              # parallel data-loading workers (0 = main process only)
 
 # Training
-epochs: 100
+epochs: 250
 batch_size: 8
 lr: 1.0e-4
-weight_decay: 1.0e-4
+weight_decay: 5.0e-4
 warmup_epochs: 10
-label_smoothing: 0.1
+label_smoothing: 0.0
 grad_clip: 1.0
 fp16: true
 weighted_sampling: false
-early_stopping_patience: 20
+early_stopping_patience: 40
+mixup_alpha: 0.1            # very light mixup
 
 # Scheduler
-scheduler: onecycle
+scheduler: cosine
 
 # Logging
 use_wandb: false

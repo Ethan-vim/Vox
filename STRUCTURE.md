@@ -108,7 +108,7 @@ Shows which project files each module imports from (`src.*` imports only).
 | Module | Key Functions / Classes | Used By |
 |--------|------------------------|---------|
 | `preprocess.py` | `download_wlasl_annotations()`, `parse_wlasl_annotations()`, `extract_keypoints_mediapipe()`, `normalize_keypoints()`, `preprocess_dataset()`, `create_splits()` | `download_wlasl.py`, `download_kaggle.py`, `predict.py`, `live_demo.py` |
-| `augment.py` | `TemporalCrop`, `TemporalSpeedPerturb`, `KeypointHorizontalFlip`, `KeypointRotation`, `KeypointTranslation`, `KeypointDropout`, `KeypointNoise`, `KeypointScale`, `Compose`, `get_train_transforms()`, `get_val_transforms()` | `train.py`, `evaluate.py`, `predict.py` |
+| `augment.py` | `TemporalCrop`, `TemporalSpeedPerturb`, `KeypointHorizontalFlip`, `KeypointYawRotation`, `KeypointRotation`, `KeypointTranslation`, `KeypointDropout`, `KeypointNoise`, `KeypointScale`, `Compose`, `get_train_transforms()`, `get_val_transforms()` | `train.py`, `evaluate.py`, `predict.py` |
 | `dataset.py` | `WLASLKeypointDataset`, `WLASLVideoDataset`, `WLASLFusionDataset`, `get_dataloader()` | `train.py`, `evaluate.py` |
 
 ### Models (`src/models/`)
@@ -151,6 +151,10 @@ data/raw/*.mp4
   │  preprocess.py                  │
   │  extract_keypoints_mediapipe()  │
   │  normalize_keypoints()          │  ──> data/processed/*.npy  (T, 543, 3)
+  │    1. shoulder-center + scale   │
+  │    2. face-center relative      │
+  │    3. depth normalization       │
+  │    4. hand-relative to wrist    │
   │  create_splits()                │  ──> data/splits/WLASL{N}/train.csv
   └─────────────────────────────────┘
 
@@ -164,7 +168,8 @@ data/processed/*.npy + data/splits/WLASL{N}/train.csv
   │      load .npy                  │
   │      pad/crop to T frames      │
   │      compute velocity (motion)  │  ──> (T, 543*6) when use_motion=True
-  │      apply augmentations        │
+  │      apply augmentations        │  (incl. KeypointYawRotation for 3D viewpoint simulation)
+  │
   │      flatten to (T, input_dim)  │
   └─────────────────────────────────┘
        │
@@ -187,7 +192,7 @@ data/processed/*.npy + data/splits/WLASL{N}/train.csv
 ```
 Single Video (predict.py):
 
-  video.mp4 ──> MediaPipe ──> normalize ──> velocity ──> model ──> top-5 predictions
+  video.mp4 ──> MediaPipe ──> normalize (shoulder+hand-relative) ──> velocity ──> model ──> top-5 predictions
        │                                                   ^
        │         OR                                        │
   keypoints.npy ──────────────> velocity ──────────────────┘
@@ -195,7 +200,7 @@ Single Video (predict.py):
 
 Live Demo (live_demo.py):
 
-  Webcam ──> FrameBuffer(T=64) ──> MediaPipe ──> normalize ──> velocity ──> model
+  Webcam ──> FrameBuffer(T=64) ──> MediaPipe ──> normalize (shoulder+hand-relative) ──> velocity ──> model
     │              │                                                          │
     │         rolls every                                                     v
     │         0.5 seconds                                                predictions
@@ -218,17 +223,18 @@ ONNX Export (export_onnx.py):
 Input: (batch, T, input_dim)     input_dim = 543*6 = 3258 (with motion)
               │
               v
-    ┌─────────────────────┐
-    │  Linear projection  │  (input_dim -> d_model)
-    └─────────┬───────────┘
+    ┌──────────────────────────┐
+    │  Multi-stage projection  │  input_dim -> intermediate_dim -> d_model
+    │  (GELU activation)       │  intermediate_dim = min(input_dim//2, d_model*4)
+    └─────────┬────────────────┘
               v
     ┌─────────────────────┐
     │  Positional Encoding│  (learned, T positions)
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
-    │  TransformerEncoder │  (num_layers=4, nhead=8, d_model=256)
-    │  x4 encoder layers  │
+    │  TransformerEncoder │  variant-scaled: 100→(2,4,128), 300→(4,6,192),
+    │  xN encoder layers  │  1000→(5,8,256), 2000→(6,8,384)
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
@@ -256,11 +262,12 @@ configs/fusion.yaml                                             │
                                                                         live_demo.py
                                                                         export_onnx.py
 
-Config.__post_init__() auto-derives:
-    wlasl_variant: 100  ──>  num_classes: 100
-    wlasl_variant: 300  ──>  num_classes: 300
-    wlasl_variant: 1000 ──>  num_classes: 1000
-    wlasl_variant: 2000 ──>  num_classes: 2000
+Config.__post_init__() auto-derives (dropout scales with model size, skipped for video approach):
+    wlasl_variant: 100  ──>  num_classes: 100,  d_model: 128, nhead: 4, num_layers: 2, dropout: 0.1
+    wlasl_variant: 300  ──>  num_classes: 300,  d_model: 192, nhead: 6, num_layers: 4, dropout: 0.3
+    wlasl_variant: 1000 ──>  num_classes: 1000, d_model: 256, nhead: 8, num_layers: 5, dropout: 0.4
+    wlasl_variant: 2000 ──>  num_classes: 2000, d_model: 384, nhead: 8, num_layers: 6, dropout: 0.5
+    Note: dropout override is skipped when approach="video" (3D CNNs use their own dropout).
 ```
 
 ---

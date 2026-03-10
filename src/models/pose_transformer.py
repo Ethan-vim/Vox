@@ -72,9 +72,15 @@ class PoseTransformer(nn.Module):
         if dim_feedforward is None:
             dim_feedforward = 4 * d_model
 
-        # Input projection
+        # Multi-stage input projection — gradual dimensionality reduction
+        # avoids the information bottleneck of a single massive compression
+        intermediate_dim = min(input_dim // 2, d_model * 4)
         self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, d_model),
+            nn.Linear(input_dim, intermediate_dim),
+            nn.GELU(),
+            nn.LayerNorm(intermediate_dim),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(intermediate_dim, d_model),
             nn.LayerNorm(d_model),
             nn.Dropout(dropout),
         )
@@ -98,10 +104,11 @@ class PoseTransformer(nn.Module):
             enable_nested_tensor=False,
         )
 
-        # Classification head
+        # Classification head — LayerNorm before Dropout to avoid train/eval
+        # distribution mismatch (Dropout after norm is the standard order).
         self.head = nn.Sequential(
-            nn.Dropout(dropout),
             nn.LayerNorm(d_model),
+            nn.Dropout(dropout),
             nn.Linear(d_model, num_classes),
         )
 
@@ -210,9 +217,14 @@ class PoseBiLSTM(nn.Module):
         input_dim = num_keypoints * features_per_kp
         hidden_dim = d_model // 2  # each direction produces hidden_dim
 
-        # Input projection
+        # Multi-stage input projection — gradual dimensionality reduction
+        intermediate_dim = min(input_dim // 2, d_model * 4)
         self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, d_model),
+            nn.Linear(input_dim, intermediate_dim),
+            nn.GELU(),
+            nn.LayerNorm(intermediate_dim),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(intermediate_dim, d_model),
             nn.LayerNorm(d_model),
             nn.Dropout(dropout),
         )
@@ -228,9 +240,10 @@ class PoseBiLSTM(nn.Module):
         )
 
         # Classification head (BiLSTM output dim = 2 * hidden_dim = d_model)
+        # LayerNorm before Dropout — standard order avoids train/eval mismatch.
         self.head = nn.Sequential(
-            nn.Dropout(dropout),
             nn.LayerNorm(d_model),
+            nn.Dropout(dropout),
             nn.Linear(d_model, num_classes),
         )
 
@@ -298,9 +311,9 @@ def build_pose_model(cfg: Any) -> nn.Module:
     approach = getattr(cfg, "approach", "pose_transformer")
     num_keypoints = getattr(cfg, "num_keypoints", 543)
     num_classes = getattr(cfg, "num_classes", 100)
-    d_model = getattr(cfg, "d_model", 256)
-    nhead = getattr(cfg, "nhead", 8)
-    num_layers = getattr(cfg, "num_layers", 4)
+    d_model = getattr(cfg, "d_model", 128)
+    nhead = getattr(cfg, "nhead", 4)
+    num_layers = getattr(cfg, "num_layers", 3)
     dropout = getattr(cfg, "dropout", 0.3)
     T = getattr(cfg, "T", 64)
     use_motion = getattr(cfg, "use_motion", False)

@@ -152,48 +152,52 @@ class TestBuildConfigValues:
         assert cfg["T"] == 64
         assert cfg["fp16"] is True
         assert cfg["wlasl_variant"] == 100
-        assert cfg["d_model"] == 256
-        assert cfg["num_layers"] == 4
+        assert cfg["d_model"] == 128
+        assert cfg["num_layers"] == 2
+        assert cfg["dropout"] == 0.1
 
     def test_pose_cpu_100(self, cpu_hw):
         cfg = auto_config.build_config_values("pose", 100, "cpu", cpu_hw)
         assert cfg["batch_size"] == 8
-        assert cfg["T"] == 32
+        assert cfg["T"] == 64
         assert cfg["fp16"] is False
         assert cfg["num_workers"] == 2
 
     def test_pose_high_300(self, high_cuda_hw):
         cfg = auto_config.build_config_values("pose", 300, "high", high_cuda_hw)
         assert cfg["batch_size"] == 64
-        assert cfg["num_layers"] == 6
+        assert cfg["d_model"] == 192
+        assert cfg["nhead"] == 6
+        assert cfg["num_layers"] == 4
         assert cfg["scheduler"] == "cosine"
-        assert cfg["epochs"] == 150
+        assert cfg["epochs"] == 300
 
     def test_pose_1000(self, cuda_hw):
         cfg = auto_config.build_config_values("pose", 1000, "mid", cuda_hw)
-        assert cfg["d_model"] == 384
-        assert cfg["num_layers"] == 6
-        assert cfg["epochs"] == 200
+        assert cfg["d_model"] == 256
+        assert cfg["nhead"] == 8
+        assert cfg["num_layers"] == 5
+        assert cfg["epochs"] == 350
 
     def test_video_mid_100(self, cuda_hw):
         cfg = auto_config.build_config_values("video", 100, "mid", cuda_hw)
         assert cfg["approach"] == "video"
         assert cfg["batch_size"] == 8
-        assert cfg["T"] == 32
+        assert cfg["T"] == 64
         assert cfg["image_size"] == 224
         assert cfg["fp16"] is True
 
     def test_video_low_100(self, low_cuda_hw):
         cfg = auto_config.build_config_values("video", 100, "low", low_cuda_hw)
         assert cfg["batch_size"] == 4
-        assert cfg["T"] == 16
+        assert cfg["T"] == 48
         assert cfg["image_size"] == 112
 
     def test_fusion_cpu(self, cpu_hw):
         cfg = auto_config.build_config_values("fusion", 100, "cpu", cpu_hw)
         assert cfg["approach"] == "fusion"
         assert cfg["batch_size"] == 4
-        assert cfg["T"] == 32
+        assert cfg["T"] == 48
         assert cfg["image_size"] == 112
         assert cfg["fp16"] is False
 
@@ -211,12 +215,12 @@ class TestBuildConfigValues:
 
     def test_variant_300_video_epochs(self, cuda_hw):
         cfg = auto_config.build_config_values("video", 300, "mid", cuda_hw)
-        assert cfg["epochs"] == 150
+        assert cfg["epochs"] == 300
 
     def test_variant_2000_fusion_epochs(self, cuda_hw):
         cfg = auto_config.build_config_values("fusion", 2000, "mid", cuda_hw)
-        assert cfg["epochs"] == 200
-        assert cfg["early_stopping_patience"] == 30
+        assert cfg["epochs"] == 400
+        assert cfg["early_stopping_patience"] == 40
 
 
 # ---------------------------------------------------------------------------

@@ -244,7 +244,7 @@ def parse_wlasl_annotations(
 def extract_frames(
     video_path: str | Path,
     output_dir: str | Path,
-    fps: int = 25,
+    fps: int = 64,
 ) -> int:
     """Extract frames from a video at a given FPS and save as JPEG images.
 
@@ -332,9 +332,9 @@ def extract_keypoints_mediapipe(
         return None
     holistic = mp_holistic.Holistic(
         static_image_mode=False,
-        model_complexity=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
+        model_complexity=2,
+        min_detection_confidence=0.3,
+        min_tracking_confidence=0.3,
     )
 
     all_keypoints: list[np.ndarray] = []
@@ -400,6 +400,8 @@ def normalize_keypoints(keypoints: np.ndarray) -> np.ndarray:
        is at the origin for every frame.  The shoulder midpoint is more
        stable than the nose, which moves during signing (head tilts, nods).
     3. Scale so the shoulder width (distance between landmarks 11 and 12) is 1.
+    4. Make hand landmarks relative to their wrist, reducing tracking noise
+       while preserving absolute wrist position in pose landmarks (15, 16).
 
     Parameters
     ----------
@@ -447,6 +449,17 @@ def normalize_keypoints(keypoints: np.ndarray) -> np.ndarray:
         scale = float(np.median(valid_widths))
 
     kps = kps / max(scale, 1e-6)
+
+    # --- Make hand landmarks relative to wrist ---
+    # Reduces noise in hand joint tracking by using local coordinates
+    # anchored at the wrist.  Absolute wrist position is preserved in
+    # pose landmarks (indices 15 and 16).
+    left_wrist = kps[:, 33:34, :].copy()   # (T, 1, 3)
+    kps[:, 33:54, :] -= left_wrist
+
+    right_wrist = kps[:, 54:55, :].copy()  # (T, 1, 3)
+    kps[:, 54:75, :] -= right_wrist
+
     return kps
 
 

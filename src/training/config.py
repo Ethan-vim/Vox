@@ -40,10 +40,10 @@ class Config:
     backbone: str = "r2plus1d_18"
     num_keypoints: int = 543
     num_classes: int = 100
-    d_model: int = 256
-    nhead: int = 8
-    num_layers: int = 4
-    dropout: float = 0.3
+    d_model: int = 128
+    nhead: int = 4
+    num_layers: int = 3
+    dropout: float = 0.5
     pretrained: bool = True
 
     # Fusion-specific
@@ -56,15 +56,15 @@ class Config:
     # --- Training ---
     epochs: int = 100
     batch_size: int = 32
-    lr: float = 1e-4
-    weight_decay: float = 1e-4
+    lr: float = 3e-4
+    weight_decay: float = 1e-3
     warmup_epochs: int = 10
-    label_smoothing: float = 0.1
+    label_smoothing: float = 0.05
     grad_clip: float = 1.0
     fp16: bool = True
     weighted_sampling: bool = False
-    early_stopping_patience: int = 20
-    mixup_alpha: float = 0.2  # Mixup interpolation parameter (0 = disabled)
+    early_stopping_patience: int = 15
+    mixup_alpha: float = 0.4  # Mixup interpolation parameter (0 = disabled)
 
     # --- Scheduler ---
     scheduler: str = "onecycle"  # onecycle or cosine
@@ -89,10 +89,39 @@ class Config:
     resume_checkpoint: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Derive num_classes from wlasl_variant for all standard variants."""
+        """Derive num_classes and model architecture from wlasl_variant.
+
+        Smaller subsets scale down transformer size AND dropout to keep the
+        regularisation proportional to model capacity.  Without this, a tiny
+        model (d_model=64, 1 layer) paired with high dropout (0.5) has so much
+        noise in the gradient that the loss never meaningfully decreases.
+
+        Architecture auto-scaling only applies to pose-based approaches
+        (pose_transformer, pose_bilstm) and the pose sub-model in fusion.
+        Video classifiers use pretrained 3D CNN backbones with their own
+        optimal dropout (typically 0.3-0.5), so we leave dropout untouched
+        for the ``video`` approach.
+        """
         variant_to_classes = {100: 100, 300: 300, 1000: 1000, 2000: 2000}
         if self.wlasl_variant in variant_to_classes:
             self.num_classes = variant_to_classes[self.wlasl_variant]
+
+        variant_to_arch = {
+            100:  {"d_model": 128, "nhead": 4, "num_layers": 2, "dropout": 0.1},
+            300:  {"d_model": 192, "nhead": 6, "num_layers": 4, "dropout": 0.3},
+            1000: {"d_model": 256, "nhead": 8, "num_layers": 5, "dropout": 0.4},
+            2000: {"d_model": 384, "nhead": 8, "num_layers": 6, "dropout": 0.5},
+        }
+        if self.wlasl_variant in variant_to_arch:
+            arch = variant_to_arch[self.wlasl_variant]
+            self.d_model = arch["d_model"]
+            self.nhead = arch["nhead"]
+            self.num_layers = arch["num_layers"]
+            # Only override dropout for pose-based approaches.  Video
+            # classifiers use pretrained backbones that need their own
+            # dropout (typically 0.3-0.5 for 3D CNNs).
+            if self.approach != "video":
+                self.dropout = arch["dropout"]
 
 
 def load_config(path: str | Path) -> Config:
