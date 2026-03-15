@@ -26,10 +26,11 @@ This document maps the entire pipeline from data download to live inference, sho
                      └────────┬────────┘
                               v
                     ┌─── train.py ───┐         evaluate.py
-                    │   (episodic    │              │
-                    │    prototypical│              v
-                    │    training)   │        eval_results/
-                    │               │        confusion_matrix.png
+                    │   (loads data, │              │
+                    │    builds      │              v
+                    │    model,      │        eval_results/
+                    │    trains)     │        confusion_matrix.png
+                    │               │
                     v               v
               checkpoints/    logs/
               best_model.pt   tensorboard/
@@ -58,36 +59,33 @@ Shows which project files each module imports from (`src.*` imports only).
                    │             │             │               │
                    v             v             v               v
             ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌────────────┐
-            │ train_   │  │evaluate. │  │ predict.  │  │ live_demo. │
-            │ proto-   │  │  py      │  │   py      │  │    py      │
-            │ typical  │  └──┬───┬──┘  └──┬──┬─────┘  └──┬──┬─────┘
-            └──┬───┬───┘     │   │        │  │           │  │
-               │   │    ┌────┘   │        │  │           │  │
-          ┌────┘   │    v        v        │  │           │  │
-          v        v                      │  │           │  │
-    ┌──────────┐ ┌──────────┐             │  │           │  │
-    │augment.py│ │dataset.py│             │  │           │  │
-    └──────────┘ └──────────┘             │  │           │  │
-                                          │  │           │  │
-    ┌──────────────────┐                  │  │           │  │
-    │episode_sampler.py│ <── train_proto  │  │           │  │
-    └──────────────────┘                  │  │           │  │
-                                          │  │           │  │
-               ┌──────────────────────────┘  │           │  │
-               v                             v           v  │
+            │ train.py │  │evaluate. │  │ predict.  │  │ live_demo. │
+            │          │  │  py      │  │   py      │  │    py      │
+            └──┬───┬───┘  └──┬───┬──┘  └──┬──┬──┬──┘  └──┬──┬─────┘
+               │   │         │   │        │  │  │        │  │
+          ┌────┘   │    ┌────┘   │        │  │  │        │  │
+          v        v    v        v        │  │  │        │  │
+    ┌──────────┐ ┌──────────┐             │  │  │        │  │
+    │augment.py│ │dataset.py│             │  │  │        │  │
+    └──────────┘ └──────────┘             │  │  │        │  │
+                                          │  │  │        │  │
+               ┌──────────────────────────┘  │  │        │  │
+               v                             v  │        v  │
     ┌────────────────┐            ┌─────────────────┐      │
-    │ preprocess.py  │            │ prototypical.py │      │
-    │ (normalize,    │            │ (Prototypical   │<─────┘
-    │  keypoints)    │            │  Network,       │
-    └────────────────┘            │  build_model)   │
-                                  └───────┬─────────┘
-                                          │
-                                          v
-                                  ┌─────────────────┐
-                                  │   stgcn.py      │
-                                  │ (STGCNEncoder,  │
-                                  │  graph utils)   │
-                                  └─────────────────┘
+    │ preprocess.py  │            │pose_transformer.│      │
+    │ (normalize,    │            │   py            │      │
+    │  keypoints)    │            │ (PoseTransformer│      │
+    └────────────────┘            │  PoseBiLSTM)    │      │
+                                  └─────────────────┘      │
+                                                           │
+               ┌───────────────────────────────────────────┘
+               v
+    ┌─────────────────┐    ┌─────────────────┐
+    │  video_i3d.py   │    │   fusion.py     │
+    │ (VideoClassifier│    │ (FusionModel,   │
+    │  build_video_   │    │  CrossAttention │
+    │  model)         │    │  Fusion)        │
+    └─────────────────┘    └─────────────────┘
 ```
 
 ---
@@ -101,44 +99,49 @@ Shows which project files each module imports from (`src.*` imports only).
 | `scripts/download_wlasl.py` | Download annotations + print video instructions | `src.data.preprocess` | `data/annotations/`, `data/raw/` |
 | `scripts/download_kaggle.py` | Download full video archive from Kaggle | `src.data.preprocess` | `data/raw/*.mp4` |
 | `scripts/validate_videos.py` | Detect and remove fake HTML video files | (none) | Cleaned `data/raw/` |
-| `scripts/reset_configs.py` | Reset YAML config to README defaults | (none) | `configs/stgcn_proto.yaml` |
+| `scripts/reset_configs.py` | Reset YAML configs to README defaults | (none) | `configs/*.yaml` |
 | `scripts/check_mediapipe.py` | Verify MediaPipe installation, diagnose `solutions` import issues | (none) | Diagnostic output to stdout |
-| `scripts/auto_config.py` | Auto-detect hardware (CUDA/MPS/CPU) and generate optimized config | (none) | `configs/stgcn_proto.yaml` |
+| `scripts/auto_config.py` | Auto-detect hardware (CUDA/MPS/CPU) and generate optimized configs | (none) | `configs/*.yaml` |
 
 ### Data Pipeline (`src/data/`)
 
 | Module | Key Functions / Classes | Used By |
 |--------|------------------------|---------|
 | `preprocess.py` | `download_wlasl_annotations()`, `parse_wlasl_annotations()`, `extract_keypoints_mediapipe()`, `normalize_keypoints()`, `preprocess_dataset()`, `create_splits()` | `download_wlasl.py`, `download_kaggle.py`, `predict.py`, `live_demo.py` |
-| `augment.py` | `TemporalCrop`, `TemporalSpeedPerturb`, `KeypointHorizontalFlip`, `KeypointYawRotation`, `KeypointRotation`, `KeypointTranslation`, `KeypointDropout`, `KeypointNoise`, `KeypointScale`, `Compose`, `get_train_transforms()`, `get_val_transforms()` | `train_prototypical.py`, `evaluate.py`, `predict.py` |
-| `dataset.py` | `WLASLKeypointDataset`, `get_dataloader()` | `train_prototypical.py`, `evaluate.py`, `predict.py` |
-| `episode_sampler.py` | `EpisodicBatchSampler` | `train_prototypical.py` |
+| `augment.py` | `TemporalCrop`, `TemporalSpeedPerturb`, `KeypointHorizontalFlip`, `KeypointYawRotation`, `KeypointRotation`, `KeypointTranslation`, `KeypointDropout`, `KeypointNoise`, `KeypointScale`, `Compose`, `get_train_transforms()`, `get_val_transforms()` | `train.py`, `evaluate.py`, `predict.py` |
+| `dataset.py` | `WLASLKeypointDataset`, `WLASLVideoDataset`, `WLASLFusionDataset`, `get_dataloader()` | `train.py`, `evaluate.py` |
 
 ### Models (`src/models/`)
 
-| Module | Key Classes | Build Function |
-|--------|-------------|----------------|
-| `stgcn.py` | `SpatialGraphConv`, `STGCNBlock`, `STGCNBranch`, `STGCNEncoder` | `build_stgcn_encoder(cfg)` |
-| `prototypical.py` | `PrototypicalNetwork` | `build_model(cfg)` |
+| Module | Key Classes | Build Function | Approaches |
+|--------|-------------|----------------|------------|
+| `__init__.py` | — | `build_model(cfg)` | Unified factory dispatching on `cfg.approach` |
+| `stgcn.py` | `STGCNEncoder` | — | ST-GCN encoder with body/hand graph branches |
+| `classifier.py` | `STGCNClassifier` | — | ST-GCN encoder + linear classification head (stgcn_ce) |
+| `prototypical.py` | `PrototypicalNetwork` | — | Prototypical network wrapper for few-shot (stgcn_proto) |
+| `pose_transformer.py` | `PoseTransformer`, `PoseBiLSTM` | `build_pose_model(cfg)` | A (pose_transformer, pose_bilstm) |
+| `video_i3d.py` | `VideoClassifier` | `build_video_model(cfg)` | B (video) |
+| `fusion.py` | `FusionModel`, `CrossAttentionFusion` | `build_fusion_model(cfg)` | C (fusion) |
 
-`build_model()` creates an `STGCNEncoder` wrapped in a `PrototypicalNetwork`. The encoder processes body (33 joints), left hand (21 joints), and right hand (21 joints) through separate ST-GCN branches, then merges into a single L2-normalized embedding.
+The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.approach` to the correct model builder. All `build_*_model()` functions take a `Config` object and return an `nn.Module`.
 
 ### Training (`src/training/`)
 
 | Module | Key Functions | Imports From |
 |--------|---------------|--------------|
 | `config.py` | `Config` (dataclass), `load_config()`, `save_config()` | (none — leaf dependency) |
-| `train.py` | CLI dispatcher | `config`, `train_prototypical` |
-| `train_prototypical.py` | `_split_episode()`, `train_one_epoch()`, `validate()`, `main()` | `config`, `augment`, `dataset`, `episode_sampler`, `prototypical` |
-| `evaluate.py` | `compute_metrics()`, `plot_confusion_matrix()`, `find_hard_negatives()`, `evaluate_latency()`, `main()` | `config`, `augment`, `dataset`, `prototypical` |
+| `train.py` | `main()` — CLI dispatcher | `config`, `train_ce`, `train_prototypical` |
+| `train_ce.py` | `train_ce()` — standard cross-entropy training loop with label smoothing + mixup | `config`, `augment`, `dataset`, `models` |
+| `train_prototypical.py` | `train_prototypical()` — episodic prototypical training loop | `config`, `augment`, `dataset`, `episode_sampler`, `models` |
+| `evaluate.py` | `compute_metrics()`, `plot_confusion_matrix()`, `find_hard_negatives()`, `evaluate_latency()`, `main()` | `config`, `augment`, `dataset`, `models` |
 
 ### Inference (`src/inference/`)
 
 | Module | Key Classes / Functions | Imports From |
 |--------|------------------------|--------------|
-| `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `prototypical`, `dataset` |
-| `live_demo.py` | `FrameBuffer`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `prototypical` |
-| `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `prototypical` |
+| `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `pose_transformer`, `video_i3d` |
+| `live_demo.py` | `FrameBuffer`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `pose_transformer` |
+| `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `pose_transformer`, `video_i3d` |
 
 ---
 
@@ -171,27 +174,22 @@ data/processed/*.npy + data/splits/WLASL{N}/train.csv
   │      load .npy                  │
   │      pad/crop to T frames      │
   │      compute velocity (motion)  │  ──> (T, 543*6) when use_motion=True
-  │      apply augmentations        │
+  │      apply augmentations        │  (incl. KeypointYawRotation for 3D viewpoint simulation)
+  │
   │      flatten to (T, input_dim)  │
   └─────────────────────────────────┘
        │
        v
   ┌─────────────────────────────────┐
-  │  train_prototypical.py          │
-  │  Episodic training:             │
-  │    EpisodicBatchSampler         │
-  │      N-way K-shot + Q-query     │
-  │    _split_episode():            │
-  │      split into support/query   │
-  │    model.forward():             │
-  │      encode → prototypes →      │
-  │      negative distances         │
-  │    F.cross_entropy(logits, y)   │
+  │  train.py                       │
+  │  train_one_epoch():             │
+  │    mixup (if enabled)           │
+  │    forward pass through model   │
+  │    loss + backprop              │
   │  validate():                    │
-  │    compute prototypes from      │
-  │    full training set            │
-  │    classify val by nearest      │  ──> checkpoints/best_model.pt
-  │    prototype                    │  ──> logs/ (TensorBoard)
+  │    forward pass (no augment)    │
+  │    compute top-1 / top-5 acc    │  ──> checkpoints/best_model.pt
+  │    early stopping check         │  ──> logs/ (TensorBoard)
   └─────────────────────────────────┘
 ```
 
@@ -200,75 +198,60 @@ data/processed/*.npy + data/splits/WLASL{N}/train.csv
 ```
 Single Video (predict.py):
 
-  video.mp4 ──> MediaPipe ──> normalize ──> velocity ──> encoder ──> prototype distances ──> top-5
-       │                                        ^
-       │         OR                             │
-  keypoints.npy ──────────> velocity ───────────┘
+  video.mp4 ──> MediaPipe ──> normalize (shoulder+hand-relative) ──> velocity ──> model ──> top-5 predictions
+       │                                                   ^
+       │         OR                                        │
+  keypoints.npy ──────────────> velocity ──────────────────┘
 
 
 Live Demo (live_demo.py):
 
-  Webcam ──> FrameBuffer(T=64) ──> MediaPipe ──> normalize ──> velocity ──> model.classify()
-    │              │                                                            │
-    │         rolls every                                                       v
-    │         0.5 seconds                                                  predictions
-    │                                                                           │
-    v                                                                           v
+  Webcam ──> FrameBuffer(T=64) ──> MediaPipe ──> normalize (shoulder+hand-relative) ──> velocity ──> model
+    │              │                                                          │
+    │         rolls every                                                     v
+    │         0.5 seconds                                                predictions
+    │                                                                         │
+    v                                                                         v
   Display <───── overlay predicted gloss + confidence (smoothed over 5 windows)
 
 
 ONNX Export (export_onnx.py):
 
-  checkpoint ──> load encoder ──> torch.onnx.export() ──> encoder.onnx (produces embeddings)
-                                       │                  prototypes stored separately
+  checkpoint ──> load model ──> torch.onnx.export() ──> model.onnx
+                                     │
                               verify (optional) ──> ONNX Runtime forward pass
                               benchmark (optional) ──> avg latency over 100 runs
 ```
 
-### Model Architecture Flow (ST-GCN + Prototypical Network)
+### Model Architecture Flow (Approach A)
 
 ```
-Input: (batch, T, 543*C)     C = 3 (xyz) or 6 (xyz + velocity)
+Input: (batch, T, input_dim)     input_dim = 543*6 = 3258 (with motion)
               │
               v
     ┌──────────────────────────┐
-    │  Partition keypoints     │
-    │  Body: joints 0-32 (33) │
-    │  LHand: joints 33-53    │
-    │  RHand: joints 54-74    │
-    └────┬─────┬─────┬────────┘
-         │     │     │
-         v     v     v
-    ┌────────┐ ┌────────┐ ┌────────┐
-    │ Body   │ │ LHand  │ │ RHand  │   Each branch: stack of STGCNBlocks
-    │ Branch │ │ Branch │ │ Branch │     Spatial GCN (bone connections)
-    │ (33 V) │ │ (21 V) │ │ (21 V) │     + Temporal Conv (kernel=9)
-    └───┬────┘ └───┬────┘ └───┬────┘     + Residual + BatchNorm
-        │          │          │
-        v          v          v
-    ┌──────────────────────────┐
-    │  Concatenate branch      │  3 × branch_out_channels
-    │  outputs                 │
+    │  Multi-stage projection  │  input_dim -> intermediate_dim -> d_model
+    │  (GELU activation)       │  intermediate_dim = min(input_dim//2, d_model*4)
     └─────────┬────────────────┘
               v
     ┌─────────────────────┐
-    │  Linear projection  │  → embedding_dim (d_model)
-    │  + LayerNorm        │
+    │  Positional Encoding│  (learned, T positions)
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
-    │  L2 normalize       │  unit-length embedding
+    │  TransformerEncoder │  variant-scaled: 100→(2,4,128), 300→(4,6,192),
+    │  xN encoder layers  │  1000→(5,8,256), 2000→(6,8,384)
     └─────────┬───────────┘
               v
-    Output: (batch, embedding_dim)
-
-Training (episodic):
-    support embeddings ──> prototypes (mean per class)
-    query embeddings ──> distances to prototypes ──> cross-entropy loss
-
-Inference:
-    prototypes computed from full training set (stored in model)
-    new sample ──> encoder ──> distance to all prototypes ──> predicted class
+    ┌─────────────────────┐
+    │  Mean pooling        │  (T, d_model) -> (d_model,)
+    └─────────┬───────────┘
+              v
+    ┌─────────────────────┐
+    │  Classification head│  Linear(d_model -> num_classes)
+    └─────────┬───────────┘
+              v
+    Output: (batch, num_classes) logits
 ```
 
 ---
@@ -276,19 +259,23 @@ Inference:
 ## Configuration Flow
 
 ```
-configs/stgcn_proto.yaml ──> load_config() ──> Config dataclass
-                                                       │
-                                           ┌───────────┼───────────┐
-                                           v           v           v
-                                     train.py    evaluate.py  predict.py
-                                                               live_demo.py
-                                                               export_onnx.py
+configs/stgcn_ce.yaml (default)
+configs/stgcn_proto.yaml
+configs/pose_transformer.yaml        ──> load_config() ──> Config dataclass
+configs/video_classifier.yaml                                   │
+configs/fusion.yaml                                             │
+                                                    ┌───────────┼───────────┐
+                                                    v           v           v
+                                              train.py    evaluate.py  predict.py
+                                                                        live_demo.py
+                                                                        export_onnx.py
 
-Config.__post_init__() auto-derives:
-    wlasl_variant: 100  ──>  num_classes: 100,  gcn_channels: [64,128,128],   d_model: 128, dropout: 0.1
-    wlasl_variant: 300  ──>  num_classes: 300,  gcn_channels: [64,128,256],   d_model: 192, dropout: 0.15
-    wlasl_variant: 1000 ──>  num_classes: 1000, gcn_channels: [64,128,256],   d_model: 256, dropout: 0.2
-    wlasl_variant: 2000 ──>  num_classes: 2000, gcn_channels: [64,128,256,256], d_model: 384, dropout: 0.2
+Config.__post_init__() auto-derives (dropout scales with model size, skipped for video approach):
+    wlasl_variant: 100  ──>  num_classes: 100,  d_model: 128, nhead: 4, num_layers: 2, dropout: 0.1
+    wlasl_variant: 300  ──>  num_classes: 300,  d_model: 192, nhead: 6, num_layers: 4, dropout: 0.3
+    wlasl_variant: 1000 ──>  num_classes: 1000, d_model: 256, nhead: 8, num_layers: 5, dropout: 0.4
+    wlasl_variant: 2000 ──>  num_classes: 2000, d_model: 384, nhead: 8, num_layers: 6, dropout: 0.5
+    Note: dropout override is skipped when approach="video" (3D CNNs use their own dropout).
 ```
 
 ---
@@ -305,12 +292,11 @@ Each test file maps to one or more source modules:
 | `test_evaluate.py` | `src/training/evaluate.py` — metrics, TTA, hard negatives, latency |
 | `test_export_onnx.py` | `src/inference/export_onnx.py` — ONNX export and verification |
 | `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, prediction smoothing |
-| `test_models.py` | `src/models/` — STGCNEncoder, PrototypicalNetwork, graph construction |
+| `test_models.py` | `src/models/` — PoseTransformer, PoseBiLSTM, FusionModel shapes |
 | `test_predict.py` | `src/inference/predict.py` — SignPredictor inference paths |
 | `test_preprocess.py` | `src/data/preprocess.py` — normalization, annotation parsing, splits |
-| `test_train.py` | `src/training/train_prototypical.py` — episode splitting |
-| `test_auto_config.py` | `scripts/auto_config.py` — hardware detection, config generation |
-| `test_dependencies.py` | All `requirements.txt` libraries — version checks, feature compatibility, src module imports |
+| `test_train.py` | `src/training/train.py` — accuracy, mixup helpers |
+| `test_dependencies.py` | All `requirements.txt` libraries — version checks, feature compatibility, src module imports (110 tests) |
 
 All tests use `conftest.py` shared fixtures (tmp datasets, keypoint generators) and are fully isolated (no project data or checkpoints needed).
 
@@ -323,12 +309,12 @@ All tests use `conftest.py` shared fixtures (tmp datasets, keypoint generators) 
 | `python scripts/download_wlasl.py` | `scripts/download_wlasl.py` | Download annotations, print video download instructions |
 | `python scripts/download_kaggle.py` | `scripts/download_kaggle.py` | Download all videos from Kaggle |
 | `python scripts/validate_videos.py` | `scripts/validate_videos.py` | Scan and clean fake video files |
-| `python scripts/reset_configs.py` | `scripts/reset_configs.py` | Reset config to recommended defaults |
+| `python scripts/reset_configs.py` | `scripts/reset_configs.py` | Reset configs to recommended defaults |
 | `python scripts/check_mediapipe.py` | `scripts/check_mediapipe.py` | Verify MediaPipe installation |
 | `python scripts/auto_config.py` | `scripts/auto_config.py` | Auto-detect hardware and generate optimized config |
 | `python -m src.data.preprocess` | `src/data/preprocess.py` | Extract keypoints from videos, create splits |
-| `python -m src.training.train` | `src/training/train.py` | Train the model (dispatches to prototypical training) |
+| `python -m src.training.train` | `src/training/train.py` | Train a model |
 | `python -m src.training.evaluate` | `src/training/evaluate.py` | Evaluate a trained model |
 | `python -m src.inference.predict` | `src/inference/predict.py` | Predict on a single video |
 | `python -m src.inference.live_demo` | `src/inference/live_demo.py` | Run real-time webcam demo |
-| `python -m src.inference.export_onnx` | `src/inference/export_onnx.py` | Export encoder to ONNX format |
+| `python -m src.inference.export_onnx` | `src/inference/export_onnx.py` | Export model to ONNX format |

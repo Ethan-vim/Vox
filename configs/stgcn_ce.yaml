@@ -1,0 +1,35 @@
+approach: stgcn_ce
+wlasl_variant: 100
+num_keypoints: 543
+T: 64
+use_motion: true
+use_augmentation: true
+
+# Model (ST-GCN encoder)
+d_model: 128
+gcn_channels: [64, 128, 128]
+num_layers: 3
+dropout: 0.1
+embedding_dim: 128
+
+# Cross-entropy training
+label_smoothing: 0.1
+mixup_alpha: 0.2
+head_dropout: 0.3
+
+# Training
+epochs: 200
+batch_size: 32
+lr: 1.0e-3
+weight_decay: 1.0e-4
+warmup_epochs: 10
+grad_clip: 1.0
+fp16: false
+weighted_sampling: true
+early_stopping_patience: 30
+scheduler: cosine
+num_workers: 4
+
+# Paths
+data_dir: data
+checkpoint_dir: checkpoints

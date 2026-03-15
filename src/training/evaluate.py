@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # Non-interactive backend for server/CI use
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -23,8 +23,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.data.augment import get_val_transforms, KeypointHorizontalFlip
-from src.data.dataset import WLASLKeypointDataset, get_dataloader
-from src.models.prototypical import PrototypicalNetwork, build_model
+from src.data.dataset import (
+    WLASLKeypointDataset,
+    get_dataloader,
+)
+from src.models import build_model
 from src.training.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -38,13 +41,27 @@ _hflip = KeypointHorizontalFlip(p=1.0, centered=True)
 
 
 def _flip_keypoints_tensor(x: torch.Tensor, num_keypoints: int = 543) -> torch.Tensor:
-    """Horizontally flip a batch of flattened keypoint tensors."""
+    """Horizontally flip a batch of flattened keypoint tensors.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Shape ``(B, T, num_keypoints * C)`` where C is 3 or 6 (with velocity).
+    num_keypoints : int
+        Number of keypoints.
+
+    Returns
+    -------
+    torch.Tensor
+        Flipped tensor with the same shape.
+    """
     B, T, F = x.shape
-    C = F // num_keypoints
+    C = F // num_keypoints  # 3 or 6
     flipped = x.clone().cpu().numpy()
     for i in range(B):
-        sample = flipped[i]
+        sample = flipped[i]  # (T, K*C)
         if C == 6:
+            # Split position and velocity, flip each, recombine
             sample_3d = sample.reshape(T, num_keypoints, C)
             pos = sample_3d[:, :, :3].copy()
             vel = sample_3d[:, :, 3:].copy()
@@ -66,15 +83,39 @@ def _flip_keypoints_tensor(x: torch.Tensor, num_keypoints: int = 543) -> torch.T
 
 @torch.no_grad()
 def compute_metrics(
-    model: PrototypicalNetwork,
+    model: nn.Module,
     loader: DataLoader,
     device: torch.device,
     class_names: list[str],
+    approach: str = "stgcn_proto",
     use_tta: bool = False,
     num_keypoints: int = 543,
 ) -> dict:
-    """Compute comprehensive evaluation metrics using prototype classification."""
+    """Compute comprehensive evaluation metrics.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Trained model in eval mode.
+    loader : DataLoader
+        Evaluation DataLoader.
+    device : torch.device
+        Target device.
+    class_names : list[str]
+        List of class/gloss names, indexed by label.
+    approach : str
+        Model approach (``'stgcn_proto'`` or ``'stgcn_ce'``).
+
+    Returns
+    -------
+    dict
+        Keys: ``top1``, ``top5``, ``per_class_accuracy``, ``confusion_matrix``,
+        ``predictions``, ``targets``.
+    """
     model.eval()
+    use_classify = hasattr(model, 'classify')
+    _infer = model.classify if use_classify else model
+
     all_preds: list[int] = []
     all_targets: list[int] = []
     all_probs: list[np.ndarray] = []
@@ -82,14 +123,16 @@ def compute_metrics(
     for batch in tqdm(loader, desc="Evaluating", leave=False):
         inputs = batch[0].to(device, non_blocking=True)
         targets = batch[1].to(device, non_blocking=True)
-        logits = model.classify(inputs)
+        logits = _infer(inputs)
 
+        # Test-Time Augmentation: average logits from original + h-flipped
         if use_tta:
             flipped = _flip_keypoints_tensor(inputs, num_keypoints=num_keypoints)
-            logits_flip = model.classify(flipped)
+            logits_flip = _infer(flipped)
             logits = (logits + logits_flip) / 2.0
 
         probs = torch.softmax(logits, dim=1)
+
         preds = logits.argmax(dim=1)
         all_preds.extend(preds.cpu().tolist())
         all_targets.extend(targets.cpu().tolist())
@@ -102,8 +145,10 @@ def compute_metrics(
     num_classes = len(class_names)
     num_samples = len(all_targets_arr)
 
+    # Top-1 accuracy
     top1 = float(np.mean(all_preds_arr == all_targets_arr)) * 100.0 if num_samples > 0 else 0.0
 
+    # Top-5 accuracy
     top5 = 0.0
     if num_samples > 0 and all_probs_arr.shape[0] > 0:
         top5_preds = np.argsort(all_probs_arr, axis=1)[:, -5:]
@@ -112,6 +157,7 @@ def compute_metrics(
         ])
         top5 = float(np.mean(top5_correct)) * 100.0
 
+    # Per-class accuracy
     per_class_acc = {}
     for cls_idx in range(num_classes):
         mask = all_targets_arr == cls_idx
@@ -122,7 +168,9 @@ def compute_metrics(
         name = class_names[cls_idx] if cls_idx < len(class_names) else str(cls_idx)
         per_class_acc[name] = cls_acc
 
+    # Confusion matrix
     from sklearn.metrics import confusion_matrix
+
     cm = confusion_matrix(all_targets_arr, all_preds_arr, labels=list(range(num_classes)))
 
     return {
@@ -147,7 +195,24 @@ def plot_confusion_matrix(
     figsize: Optional[tuple[int, int]] = None,
     max_classes_annotated: int = 30,
 ) -> None:
-    """Plot and save a confusion matrix heatmap."""
+    """Plot and save a confusion matrix heatmap.
+
+    For large numbers of classes, cell annotations are omitted to keep
+    the plot readable.
+
+    Parameters
+    ----------
+    cm : np.ndarray
+        Confusion matrix of shape ``(num_classes, num_classes)``.
+    class_names : list[str]
+        Class names for axis labels.
+    save_path : str or Path
+        Path to save the figure.
+    figsize : tuple[int, int] or None
+        Figure size.  Defaults to a size proportional to the number of classes.
+    max_classes_annotated : int
+        Maximum number of classes for which to show cell value annotations.
+    """
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -158,17 +223,26 @@ def plot_confusion_matrix(
 
     fig, ax = plt.subplots(figsize=figsize)
 
+    # Normalize by row (true class) for per-class recall
     row_sums = cm.sum(axis=1, keepdims=True)
     cm_normalized = np.divide(
-        cm.astype(np.float64), row_sums,
-        out=np.zeros_like(cm, dtype=np.float64), where=row_sums > 0,
+        cm.astype(np.float64),
+        row_sums,
+        out=np.zeros_like(cm, dtype=np.float64),
+        where=row_sums > 0,
     )
 
     annot = n <= max_classes_annotated
     sns.heatmap(
-        cm_normalized, annot=annot, fmt=".2f" if annot else "",
-        cmap="Blues", xticklabels=class_names, yticklabels=class_names,
-        ax=ax, vmin=0.0, vmax=1.0,
+        cm_normalized,
+        annot=annot,
+        fmt=".2f" if annot else "",
+        cmap="Blues",
+        xticklabels=class_names,
+        yticklabels=class_names,
+        ax=ax,
+        vmin=0.0,
+        vmax=1.0,
     )
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
@@ -190,10 +264,27 @@ def find_hard_negatives(
     class_names: list[str],
     top_k: int = 10,
 ) -> list[tuple[str, str, int]]:
-    """Identify the most commonly confused class pairs."""
+    """Identify the most commonly confused class pairs from a confusion matrix.
+
+    Parameters
+    ----------
+    cm : np.ndarray
+        Confusion matrix of shape ``(num_classes, num_classes)``.
+    class_names : list[str]
+        Class name list.
+    top_k : int
+        Number of top confused pairs to return.
+
+    Returns
+    -------
+    list[tuple[str, str, int]]
+        List of ``(true_class, predicted_class, count)`` sorted descending.
+    """
+    # Zero out the diagonal (correct predictions are not confusions)
     cm_off = cm.copy()
     np.fill_diagonal(cm_off, 0)
 
+    # Find top-k off-diagonal entries
     flat_indices = np.argsort(cm_off.ravel())[::-1][:top_k]
     n = cm.shape[0]
 
@@ -222,13 +313,31 @@ def evaluate_latency(
     input_shape: tuple[int, ...],
     n_runs: int = 100,
 ) -> dict[str, float]:
-    """Measure inference latency of the encoder."""
+    """Measure inference latency of a model.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Model to benchmark.
+    device : torch.device
+        Device to run on.
+    input_shape : tuple[int, ...]
+        Shape of a single input tensor (without batch dim).
+    n_runs : int
+        Number of forward passes to average over.
+
+    Returns
+    -------
+    dict[str, float]
+        Keys: ``mean_ms``, ``std_ms``, ``min_ms``, ``max_ms``, ``fps``.
+    """
     model.eval()
     dummy = torch.randn(1, *input_shape, device=device)
 
+    # Warm-up
     for _ in range(10):
         with torch.no_grad():
-            _ = model.classify(dummy)
+            _ = model(dummy)
 
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -243,7 +352,7 @@ def evaluate_latency(
             torch.mps.synchronize()
         t0 = time.perf_counter()
         with torch.no_grad():
-            _ = model.classify(dummy)
+            _ = model(dummy)
         if device.type == "cuda":
             torch.cuda.synchronize()
         elif device.type == "mps":
@@ -265,6 +374,15 @@ def evaluate_latency(
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
+
+def _build_model(cfg: Config, device: torch.device) -> nn.Module:
+    """Build and load a model from checkpoint."""
+    if cfg.approach in ("stgcn_proto", "stgcn_ce"):
+        model = build_model(cfg)
+    else:
+        raise ValueError(f"Unknown approach '{cfg.approach}'")
+    return model.to(device)
 
 
 def main() -> None:
@@ -290,10 +408,9 @@ def main() -> None:
         device = torch.device("cpu")
 
     # Build and load model
-    model = build_model(cfg).to(device)
+    model = _build_model(cfg, device)
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     state_dict = ckpt["model_state_dict"]
-    # Remove prototypes from checkpoint — they'll be recomputed from training data
     state_dict.pop("prototypes", None)
     model.load_state_dict(state_dict, strict=False)
     model.eval()
@@ -301,7 +418,6 @@ def main() -> None:
     # Build dataset
     data_dir = Path(cfg.data_dir)
     split_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / f"{args.split}.csv"
-    train_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / "train.csv"
 
     transform = get_val_transforms(T=cfg.T)
     dataset = WLASLKeypointDataset(
@@ -311,21 +427,27 @@ def main() -> None:
         T=cfg.T,
         use_motion=getattr(cfg, "use_motion", False),
     )
-    train_ds = WLASLKeypointDataset(
-        split_csv=train_csv,
-        keypoint_dir=data_dir / "processed",
-        transform=transform,
-        T=cfg.T,
-        use_motion=getattr(cfg, "use_motion", False),
-    )
 
     loader = get_dataloader(dataset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
-    proto_loader = get_dataloader(train_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
 
-    # Compute prototypes from training data
-    model.compute_prototypes(proto_loader)
+    # Compute prototypes for prototypical models (stgcn_proto)
+    if hasattr(model, 'compute_prototypes'):
+        train_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / "train.csv"
+        train_transform = get_val_transforms(T=cfg.T)
+        train_dataset = WLASLKeypointDataset(
+            split_csv=train_csv,
+            keypoint_dir=data_dir / "processed",
+            transform=train_transform,
+            T=cfg.T,
+            use_motion=getattr(cfg, "use_motion", False),
+        )
+        proto_loader = get_dataloader(
+            train_dataset, batch_size=cfg.batch_size, shuffle=False,
+            num_workers=cfg.num_workers,
+        )
+        model.compute_prototypes(proto_loader)
 
-    # Build class names
+    # Build class names from all available split CSVs for complete coverage
     import pandas as pd
     class_names = [""] * cfg.num_classes
     splits_dir = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}"
@@ -338,21 +460,26 @@ def main() -> None:
                 if idx < cfg.num_classes and not class_names[idx]:
                     class_names[idx] = row["gloss"]
 
-    # Compute metrics
+    # Compute metrics (single inference pass, with optional TTA)
     metrics = compute_metrics(
         model, loader, device, class_names,
+        approach=cfg.approach,
         use_tta=getattr(cfg, "use_tta", False),
         num_keypoints=cfg.num_keypoints,
     )
     logger.info("Top-1 Accuracy: %.2f%%", metrics["top1"])
     logger.info("Top-5 Accuracy: %.2f%%", metrics["top5"])
 
-    # Confusion matrix
+    # Plot confusion matrix
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    plot_confusion_matrix(metrics["confusion_matrix"], class_names, output_dir / "confusion_matrix.png")
+    plot_confusion_matrix(
+        metrics["confusion_matrix"],
+        class_names,
+        output_dir / "confusion_matrix.png",
+    )
 
-    # Hard negatives
+    # Hard negatives (reuses the already-computed confusion matrix — no re-inference)
     pairs = find_hard_negatives(metrics["confusion_matrix"], class_names, top_k=10)
     logger.info("Top confused pairs:")
     for true_cls, pred_cls, count in pairs:

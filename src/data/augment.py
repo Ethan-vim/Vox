@@ -8,6 +8,7 @@ recognition, including correct left/right swapping for MediaPipe landmarks.
 from typing import Optional
 
 import numpy as np
+import torch
 
 # ---------------------------------------------------------------------------
 # MediaPipe swap indices for horizontal flip
@@ -539,3 +540,23 @@ def get_val_transforms(T: int = 64) -> Compose:
             TemporalCrop(T=T),
         ]
     )
+
+
+def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 0.2):
+    """Apply mixup augmentation on a batch.
+
+    Returns mixed_x, y_a, y_b, lam.
+    """
+    if alpha > 0:
+        lam = float(np.random.beta(alpha, alpha))
+    else:
+        lam = 1.0
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size, device=x.device)
+    mixed_x = lam * x + (1 - lam) * x[index]
+    return mixed_x, y, y[index], lam
+
+
+def mixup_criterion(criterion, pred: torch.Tensor, y_a: torch.Tensor, y_b: torch.Tensor, lam: float):
+    """Compute mixup loss."""
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)

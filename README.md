@@ -4,80 +4,101 @@ A real-time ASL word-level recognition system that captures live webcam video, p
 
 ## Table of Contents
 
-- **[Architecture](#architecture)**
-- **[Quick Start](#quick-start)**
-  - [1. Environment Setup](#1-environment-setup)
-    - [Installing PyTorch with CUDA support](#installing-pytorch-with-cuda-support)
-  - [2. Download the Dataset](#2-download-the-dataset)
-    - [Option A: Kaggle (Recommended)](#option-a-kaggle-recommended--fastest)
-    - [Option B: Official WLASL scripts](#option-b-official-wlasl-scripts-url-based)
-    - [Validate downloaded videos](#validate-downloaded-videos)
-    - [End-to-end quick start with Kaggle](#end-to-end-quick-start-with-kaggle)
-    - [Choosing a wlasl_variant with Kaggle](#choosing-a-wlasl_variant-with-kaggle)
-    - [Device-specific configuration after Kaggle download](#device-specific-configuration-after-kaggle-download)
-  - [3. Preprocess Data](#3-preprocess-data)
-    - [Working with multiple variants](#working-with-multiple-variants)
-  - [4. Train a Model](#4-train-a-model)
-  - [5. Evaluate](#5-evaluate)
-  - [6. Run the Live Demo](#6-run-the-live-demo)
-  - [7. Single Video Prediction](#7-single-video-prediction)
-  - [8. Export to ONNX](#8-export-to-onnx)
-  - [9. Run Tests](#9-run-tests)
-- **[Project Structure](#project-structure)**
-- **[Configuration Guide](#configuration-guide)**
-  - [Auto-Configure for Your Hardware](#auto-configure-for-your-hardware)
-- **[Architecture: ST-GCN + Prototypical Network](#architecture-st-gcn--prototypical-network)**
-  - [ST-GCN Encoder](#st-gcn-encoder)
-  - [Prototypical Network](#prototypical-network-few-shot-metric-learning)
-- **[Troubleshooting](#troubleshooting)**
-  - [HTML files masquerading as videos](#html-files-masquerading-as-videos)
-  - [MediaPipe installation issues](#mediapipe-installation-issues)
-  - [CUDA out of memory](#cuda-out-of-memory)
-  - [Webcam not detected](#webcam-not-detected)
-  - [Low accuracy](#low-accuracy)
-  - [Diagnosing partial data](#diagnosing-partial-data-most-common-issue)
-  - [wlasl_variant / num_classes mismatch](#wlasl_variant--num_classes-mismatch)
-- **[Recommended Configurations](#recommended-configurations)**
-  - [WLASL100 (recommended starting point)](#wlasl100-recommended-starting-point)
-  - [WLASL300](#wlasl300)
-  - [WLASL1000](#wlasl1000)
-  - [WLASL2000](#wlasl2000)
-- **[Tips & Best Practices](#tips--best-practices)**
-  - [Hardware-Specific Setup](#hardware-specific-setup)
-  - [Training with Limited Data](#training-with-limited-data)
-  - [Improving Accuracy](#improving-accuracy)
-  - [What to Expect](#what-to-expect)
-  - [Common Pitfalls](#common-pitfalls)
-- **[Recommended Library & CUDA Versions](#recommended-library--cuda-versions)**
-  - [PyTorch ↔ CUDA Compatibility](#pytorch--cuda-compatibility)
-  - [MediaPipe](#mediapipe)
-  - [Other Key Libraries](#other-key-libraries)
-- **[Citation](#citation)**
-- **[License](#license)**
+- **[Architecture](#architecture)** — Line 61
+- **[Quick Start](#quick-start)** — Line 93
+  - [1. Environment Setup](#1-environment-setup) — Line 95
+    - [Installing PyTorch with CUDA support](#installing-pytorch-with-cuda-support) — Line 133
+  - [2. Download the Dataset](#2-download-the-dataset) — Line 169
+    - [Option A: Kaggle (Recommended)](#option-a-kaggle-recommended--fastest) — Line 171
+    - [Option B: Official WLASL scripts](#option-b-official-wlasl-scripts-url-based) — Line 236
+    - [Validate downloaded videos](#validate-downloaded-videos) — Line 247
+    - [End-to-end quick start with Kaggle](#end-to-end-quick-start-with-kaggle) — Line 264
+    - [Choosing a wlasl_variant with Kaggle](#choosing-a-wlasl_variant-with-kaggle) — Line 305
+    - [Device-specific configuration after Kaggle download](#device-specific-configuration-after-kaggle-download) — Line 320
+  - [3. Preprocess Data](#3-preprocess-data) — Line 383
+    - [Working with multiple variants](#working-with-multiple-variants) — Line 409
+  - [4. Train a Model](#4-train-a-model) — Line 464
+  - [5. Evaluate](#5-evaluate) — Line 499
+  - [6. Run the Live Demo](#6-run-the-live-demo) — Line 525
+  - [7. Single Video Prediction](#7-single-video-prediction) — Line 555
+  - [8. Export to ONNX](#8-export-to-onnx) — Line 607
+  - [9. Run Tests](#9-run-tests) — Line 635
+- **[Project Structure](#project-structure)** — Line 678
+- **[Configuration Guide](#configuration-guide)** — Line 745
+  - [Auto-Configure for Your Hardware](#auto-configure-for-your-hardware) — Line 759
+- **[Approach Details](#approach-details)** — Line 881
+  - [Approach A: Pose/Keypoint Transformer](#approach-a-posekeypoint-transformer) — Line 883
+  - [Approach B: RGB Video Classifier](#approach-b-rgb-video-classifier) — Line 903
+  - [Approach C: Hybrid Fusion](#approach-c-hybrid-fusion) — Line 911
+- **[Troubleshooting](#troubleshooting)** — Line 919
+  - [HTML files masquerading as videos](#html-files-masquerading-as-videos) — Line 921
+  - [MediaPipe installation issues](#mediapipe-installation-issues) — Line 924
+  - [CUDA out of memory](#cuda-out-of-memory) — Line 936
+  - [Webcam not detected](#webcam-not-detected) — Line 942
+  - [Low accuracy](#low-accuracy) — Line 948
+  - [Diagnosing partial data](#diagnosing-partial-data-most-common-issue) — Line 953
+  - [wlasl_variant / num_classes mismatch](#wlasl_variant--num_classes-mismatch) — Line 1000
+- **[Recommended Configurations](#recommended-configurations)** — Line 1006
+  - [WLASL100 (recommended starting point)](#wlasl100-recommended-starting-point) — Line 1010
+  - [WLASL300](#wlasl300) — Line 1043
+  - [WLASL1000](#wlasl1000) — Line 1090
+  - [WLASL2000](#wlasl2000) — Line 1113
+  - [Video Classifier (Approach B)](#video-classifier-approach-b) — Line 1089
+  - [Fusion (Approach C)](#fusion-approach-c) — Line 1105
+- **[Tips & Best Practices](#tips--best-practices)** — Line 1124
+  - [Hardware-Specific Setup](#hardware-specific-setup) — Line 1126
+  - [Training with Limited Data](#training-with-limited-data) — Line 1149
+  - [Improving Accuracy](#improving-accuracy) — Line 1161
+  - [What to Expect](#what-to-expect) — Line 1172
+  - [Common Pitfalls](#common-pitfalls) — Line 1184
+- **[Recommended Library & CUDA Versions](#recommended-library--cuda-versions)** — Line 1195
+  - [PyTorch ↔ CUDA Compatibility](#pytorch--cuda-compatibility) — Line 1199
+  - [MediaPipe](#mediapipe) — Line 1218
+  - [Other Key Libraries](#other-key-libraries) — Line 1231
+- **[Citation](#citation)** — Line 1248
+- **[License](#license)** — Line 1260
 
 ---
 
 ## Architecture
 
 ```
-                    ┌─────────────────────────────────────┐
-                    │  ST-GCN + Prototypical Network       │
-                    │                                      │
-Webcam  --> Frame --│  MediaPipe    ST-GCN Encoder         │--> Predicted
-Feed        Buffer  │  Holistic --> (Body + Hand branches) │    Gloss +
-(OpenCV)    (T=64)  │  Keypoints   + Prototypical Network  │    Confidence
-                    │  + Velocity  (metric learning)       │
-                    └─────────────────────────────────────┘
+                        APPROACH A (Pose/Keypoint)
+                    +-------------------------------+
+                    |  MediaPipe     Transformer/   |
+Webcam  --> Frame --+  Holistic  --> LSTM Encoder --+--> Predicted
+Feed        Buffer  |  Keypoints    (T, 543*6)     |    Gloss +
+(OpenCV)    (T=64)  |  + Velocity                  |    Confidence
+                    +-------------------------------+
+                    |                               |
+                    |  APPROACH B (RGB Video)        |
+                    |  R(2+1)D / SlowFast / R3D    |
+                    |  (B, 3, T, 224, 224)         |
+                    +-------------------------------+
+                    |                               |
+                    |  APPROACH C (Hybrid Fusion)    |
+                    |  Concat / Cross-Attention     |
+                    |  of Pose + Video features     |
+                    +-------------------------------+
 ```
 
-**ST-GCN + Prototypical Network** — designed for few-shot learning with limited training data (~6-8 samples per class in WLASL):
+**Three approaches are implemented:**
 
-| Component | Description | Input |
-|-----------|-------------|-------|
-| ST-GCN Encoder | Spatiotemporal Graph CNN with body/hand branches | MediaPipe keypoints (T, 543, 6) with velocity |
-| Prototypical Network | Metric learning via N-way K-shot episodic training | Encoder embeddings |
 
-The model processes body (33 joints), left hand (21 joints), and right hand (21 joints) through separate ST-GCN branches with skeleton-aware graph convolutions, merges them into a single L2-normalized embedding, and classifies by distance to class prototypes.
+| Approach             | Model                                  | Input                                         | WLASL-100 Top-1 (expected) |
+| -------------------- | -------------------------------------- | --------------------------------------------- | -------------------------- |
+| A - Pose Transformer | Transformer Encoder / BiLSTM           | MediaPipe keypoints (T, 543, 6) with velocity | 60–70%                     |
+| B - Video Classifier | R(2+1)D-18, R3D-18, SlowFast           | RGB frames (3, T, 224, 224)                   | 65–75%                     |
+| C - Hybrid Fusion    | Concat / Cross-Attention fusion of A+B | Both streams                                  | 70–78%                     |
+
+**Two training approaches are available for keypoint-based models:**
+
+| Approach | Config | Description |
+| -------- | ------ | ----------- |
+| `stgcn_ce` (default) | `configs/stgcn_ce.yaml` | Standard cross-entropy classification with label smoothing and mixup. Best for closed-set classification with known classes. |
+| `stgcn_proto` | `configs/stgcn_proto.yaml` | Episodic prototypical training. Best for few-shot scenarios or when you need to classify new signs without retraining. |
+
+To switch between approaches, change the `approach` field in your YAML config file (see [Switching Between Approaches](#switching-between-approaches)).
 
 
 ---
@@ -96,7 +117,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-python scripts/auto_config.py
+python scripts/auto_config.py --approach pose
 ```
 
 **Windows (PowerShell):**
@@ -109,7 +130,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-python scripts/auto_config.py
+python scripts/auto_config.py --approach pose
 ```
 
 **Windows (Command Prompt):**
@@ -122,7 +143,7 @@ python -m venv .venv
 .venv\Scripts\activate.bat
 
 pip install -r requirements.txt
-python scripts/auto_config.py
+python scripts/auto_config.py --approach pose
 ```
 
 #### Installing PyTorch with CUDA support
@@ -265,7 +286,7 @@ If you want the fastest path from zero to training, run these commands in order 
 pip install -r requirements.txt
 
 # 2. Auto-detect hardware and generate optimized config
-python scripts/auto_config.py
+python scripts/auto_config.py --approach pose
 
 # 3. Configure Kaggle API (one-time — see "One-time Kaggle API setup" above)
 
@@ -277,16 +298,16 @@ python scripts/download_kaggle.py --subset WLASL100
 # 5. Validate and clean up bad files
 python scripts/validate_videos.py --video-dir data/raw --delete
 
-# 6. Extract keypoints (use --model-complexity 1 for ~2-3x faster extraction)
+# 6. Extract keypoints
 python -m src.data.preprocess --data-dir data --subset WLASL100 --mode keypoints
 
 # 7. Train (see device-specific configs below)
-python -m src.training.train --config configs/stgcn_proto.yaml
+python -m src.training.train --config configs/pose_transformer.yaml
 
 # 8. Evaluate
 #    Linux/macOS uses \ for line continuation; Windows PowerShell uses `
 python -m src.training.evaluate \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt \
     --split val --output-dir eval_results
 
@@ -294,7 +315,7 @@ On Windows PowerShell, the evaluate command (step 8) becomes:
 
 ```powershell
 python -m src.training.evaluate `
-    --config configs/stgcn_proto.yaml `
+    --config configs/pose_transformer.yaml `
     --checkpoint checkpoints/best_model.pt `
     --split val --output-dir eval_results
 ```
@@ -309,7 +330,7 @@ The Kaggle archive contains all ~12K videos covering every WLASL variant. After 
 | `wlasl_variant: 100`  | 100     | 800–1,200                | Easiest    | First-time setup, prototyping, CPU training |
 | `wlasl_variant: 300`  | 300     | 2,000–3,500              | Moderate   | Better vocabulary coverage with a GPU       |
 | `wlasl_variant: 1000` | 1,000   | 5,000–8,000              | Hard       | Research, large-GPU setups                  |
-| `wlasl_variant: 2000` | 2,000   | 8,000–12,000             | Hardest    | Full dataset, research use                  |
+| `wlasl_variant: 2000` | 2,000   | 8,000–12,000             | Hardest    | Full dataset, consider fusion (Approach C)  |
 
 
 **Start with `wlasl_variant: 100`** — it has the most samples per class, trains fastest, and gives the highest per-class accuracy. Scale up once your pipeline is working.
@@ -318,52 +339,52 @@ Larger variants need more model capacity. See the [Recommended Configurations](#
 
 #### Device-specific configuration after Kaggle download
 
-After downloading the Kaggle dataset, adjust `configs/stgcn_proto.yaml` for your hardware before training (step 6). Set `wlasl_variant` to match the subset you preprocessed in step 5.
+After downloading the Kaggle dataset, adjust `configs/pose_transformer.yaml` for your hardware before training (step 6). Set `wlasl_variant` to match the subset you preprocessed in step 5.
 
 **CPU-only (no GPU):**
 
 ```yaml
-approach: stgcn_proto
+approach: pose_transformer
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
 fp16: false                  # FP16 only works on CUDA
 batch_size: 8                # smaller batches to avoid memory pressure
 num_workers: 2
 T: 64
 d_model: 128
-gcn_channels: [64, 128, 128]
+nhead: 4
+num_layers: 2
 dropout: 0.1
-n_way: 20
-k_shot: 3
-q_query: 2
-num_episodes: 500
-lr: 1.0e-3
-weight_decay: 1.0e-4
+lr: 3.0e-4
+weight_decay: 5.0e-4
+label_smoothing: 0.0
+mixup_alpha: 0.15
 scheduler: cosine
-epochs: 200
+weighted_sampling: true
+epochs: 250
 ```
 
-Use `--device cpu` for inference and live demo. The ST-GCN encoder is lightweight enough for CPU training.
+Use `--device cpu` for inference and live demo. Stick to Approach A (pose_transformer) — video models are too slow on CPU for training.
 
 **GPU / CUDA:**
 
 ```yaml
-approach: stgcn_proto
+approach: pose_transformer
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
 fp16: true                   # faster training, lower memory
 batch_size: 64               # increase to 64 for large GPUs
 num_workers: 8
 T: 64
 d_model: 128
-gcn_channels: [64, 128, 128]
+nhead: 4
+num_layers: 2
 dropout: 0.1
-n_way: 20
-k_shot: 3
-q_query: 2
-num_episodes: 500
-lr: 1.0e-3
-weight_decay: 1.0e-4
+lr: 3.0e-4
+weight_decay: 5.0e-4
+label_smoothing: 0.0
+mixup_alpha: 0.15
 scheduler: cosine
-epochs: 200
+weighted_sampling: true
+epochs: 250
 ```
 
 Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_size` first, then `T`.
@@ -371,26 +392,26 @@ Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_si
 **Apple Silicon (M1/M2/M3/M4):**
 
 ```yaml
-approach: stgcn_proto
+approach: pose_transformer
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
-fp16: false                  # MPS does not support FP16 or AMP
+fp16: false                  # MPS does not support FP16 reliably
 batch_size: 16
-num_workers: 0               # MPS deadlocks with multiprocessing workers
+num_workers: 2
 T: 64
 d_model: 128
-gcn_channels: [64, 128, 128]
+nhead: 4
+num_layers: 2
 dropout: 0.1
-n_way: 10                    # lower than CUDA — prevents Metal command queue stalls
-k_shot: 3
-q_query: 2
-num_episodes: 200            # fewer episodes per epoch for MPS throughput
-lr: 1.0e-3
-weight_decay: 1.0e-4
+lr: 3.0e-4
+weight_decay: 5.0e-4
+label_smoothing: 0.0
+mixup_alpha: 0.15
 scheduler: cosine
-epochs: 200
+weighted_sampling: true
+epochs: 250
 ```
 
-MPS limitations: `pin_memory`, `non_blocking`, `torch.cdist` backward, and `torch.einsum` (some patterns) are unsupported — the code handles all of these automatically. Use `--device cpu` for the live demo to avoid MPS overhead. Install MediaPipe with `pip install mediapipe-silicon` if the standard package fails.
+Use `--device cpu` for the live demo to avoid MPS overhead. Install MediaPipe with `pip install mediapipe-silicon` if the standard package fails.
 
 ---
 
@@ -398,23 +419,13 @@ MPS limitations: `pin_memory`, `non_blocking`, `torch.cdist` backward, and `torc
 
 The preprocessing pipeline is **source-agnostic** — it reads mp4 files from `data/raw/` regardless of whether they were downloaded via Kaggle (Option A) or URL-based scripts (Option B). No extra flags or options are needed.
 
-Extract MediaPipe Holistic keypoints (543 landmarks per frame) from all valid videos. The extraction uses `model_complexity=2` by default with lower detection/tracking confidence thresholds (0.3) to maximize the number of frames with valid keypoints:
+Extract MediaPipe Holistic keypoints (543 landmarks per frame) from all valid videos. The extraction uses `model_complexity=2` with lower detection/tracking confidence thresholds (0.3) to maximize the number of frames with valid keypoints:
 
 ```bash
 python -m src.data.preprocess --data-dir data --subset WLASL100 --mode keypoints
 ```
 
-For faster extraction on CPU (especially Intel), use `--model-complexity 1` which is ~2-3x faster with minimal quality loss for sign language:
-
-```bash
-python -m src.data.preprocess --data-dir data --subset WLASL100 --mode keypoints --model-complexity 1
-```
-
-| `--model-complexity` | Speed   | Accuracy | Recommended for |
-|----------------------|---------|----------|-----------------|
-| `0`                  | Fastest | Lowest   | Quick testing only |
-| `1`                  | Fast    | Good     | CPU-bound machines, large datasets |
-| `2` (default)        | Slow    | Best     | GPU machines, final training data |
+> **Note:** If you previously preprocessed data with older settings (model_complexity=1, confidence thresholds=0.5), regenerate your keypoints by deleting `data/processed/` and re-running the command above. The new settings produce higher quality keypoints and capture more frames.
 
 This creates:
 
@@ -423,6 +434,12 @@ data/processed/<video_id>.npy       # keypoints, shape (T, 543, 3) — shared ac
 data/splits/WLASL100/train.csv      # variant-specific split files
 data/splits/WLASL100/val.csv
 data/splits/WLASL100/test.csv
+```
+
+To extract raw frames instead (needed for Approach B/C training):
+
+```bash
+python -m src.data.preprocess --data-dir data --subset WLASL100 --mode frames
 ```
 
 Use `--max-workers N` to control parallel extraction (default: 4).
@@ -487,11 +504,20 @@ data/
 Set `wlasl_variant` in your config to match the subset you preprocessed. All scripts automatically resolve split files from `data/splits/WLASL{N}/`.
 
 ```bash
-# Train with default config (ST-GCN + Prototypical Network)
+# ST-GCN + Cross-Entropy (default, recommended starting point)
+python -m src.training.train --config configs/stgcn_ce.yaml
+
+# ST-GCN + Prototypical Network (few-shot training)
 python -m src.training.train --config configs/stgcn_proto.yaml
+
+# Approach B: Video Classifier
+python -m src.training.train --config configs/video_classifier.yaml
+
+# Approach C: Hybrid Fusion
+python -m src.training.train --config configs/fusion.yaml
 ```
 
-Training uses episodic N-way K-shot learning: each episode samples N classes with K support + Q query samples. Checkpoints are saved to `checkpoints/` and logs to `logs/`.
+Training checkpoints are saved to `checkpoints/` and logs to `logs/`.
 
 ```bash
 # Monitor training in real time
@@ -502,11 +528,11 @@ To train on a different variant, either edit `wlasl_variant` in an existing conf
 
 ```bash
 # Copy and modify — only change wlasl_variant (num_classes is auto-derived)
-cp configs/stgcn_proto.yaml configs/stgcn_wlasl300.yaml          # Linux/macOS
-# copy configs\stgcn_proto.yaml configs\stgcn_wlasl300.yaml      # Windows
+cp configs/pose_transformer.yaml configs/pose_wlasl300.yaml          # Linux/macOS
+# copy configs\pose_transformer.yaml configs\pose_wlasl300.yaml      # Windows
 
 # Edit wlasl_variant: 300 in the new file
-python -m src.training.train --config configs/stgcn_wlasl300.yaml
+python -m src.training.train --config configs/pose_wlasl300.yaml
 ```
 
 ---
@@ -517,7 +543,7 @@ python -m src.training.train --config configs/stgcn_wlasl300.yaml
 
 ```bash
 python -m src.training.evaluate \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt \
     --split val \
     --output-dir eval_results
@@ -527,7 +553,7 @@ python -m src.training.evaluate \
 
 ```powershell
 python -m src.training.evaluate `
-    --config configs/stgcn_proto.yaml `
+    --config configs/pose_transformer.yaml `
     --checkpoint checkpoints/best_model.pt `
     --split val `
     --output-dir eval_results
@@ -543,7 +569,7 @@ This prints top-1/top-5 accuracy, per-class breakdown, and saves a confusion mat
 
 ```bash
 python -m src.inference.live_demo \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt \
     --camera 0 \
     --device cpu
@@ -553,7 +579,7 @@ python -m src.inference.live_demo \
 
 ```powershell
 python -m src.inference.live_demo `
-    --config configs/stgcn_proto.yaml `
+    --config configs/pose_transformer.yaml `
     --checkpoint checkpoints/best_model.pt `
     --camera 0 `
     --device cpu
@@ -576,19 +602,19 @@ The demo runs three threads: a capture thread reads webcam frames continuously, 
 # From a video file
 python -m src.inference.predict \
     --video path/to/video.mp4 \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt
 
 # From a pre-extracted keypoint .npy file
 python -m src.inference.predict \
     --keypoints data/processed/12345.npy \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt
 
 # Specify device (auto, cpu, cuda, mps)
 python -m src.inference.predict \
     --video path/to/video.mp4 \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt \
     --device cpu
 ```
@@ -599,19 +625,19 @@ python -m src.inference.predict \
 # From a video file
 python -m src.inference.predict `
     --video path\to\video.mp4 `
-    --config configs\stgcn_proto.yaml `
+    --config configs\pose_transformer.yaml `
     --checkpoint checkpoints\best_model.pt
 
 # From a pre-extracted keypoint .npy file
 python -m src.inference.predict `
     --keypoints data\processed\12345.npy `
-    --config configs\stgcn_proto.yaml `
+    --config configs\pose_transformer.yaml `
     --checkpoint checkpoints\best_model.pt
 
 # Specify device (auto, cpu, cuda, mps)
 python -m src.inference.predict `
     --video path\to\video.mp4 `
-    --config configs\stgcn_proto.yaml `
+    --config configs\pose_transformer.yaml `
     --checkpoint checkpoints\best_model.pt `
     --device cpu
 ```
@@ -626,7 +652,7 @@ Returns the predicted gloss, confidence score, and top-5 alternatives.
 
 ```bash
 python -m src.inference.export_onnx \
-    --config configs/stgcn_proto.yaml \
+    --config configs/pose_transformer.yaml \
     --checkpoint checkpoints/best_model.pt \
     --output model.onnx \
     --verify \
@@ -637,7 +663,7 @@ python -m src.inference.export_onnx \
 
 ```powershell
 python -m src.inference.export_onnx `
-    --config configs/stgcn_proto.yaml `
+    --config configs/pose_transformer.yaml `
     --checkpoint checkpoints/best_model.pt `
     --output model.onnx `
     --verify `
@@ -654,7 +680,7 @@ python -m src.inference.export_onnx `
 
 ```bash
 source .venv/bin/activate
-python -m pytest                          # full test suite (273 tests)
+python -m pytest                          # full test suite (286 tests)
 python -m pytest tests/test_augment.py    # specific test file
 python -m pytest tests/test_dependencies.py  # dependency compatibility tests
 python -m pytest -q                       # quiet output
@@ -670,7 +696,7 @@ Or without activating the venv:
 
 ```powershell
 .venv\Scripts\Activate.ps1
-python -m pytest                          # full test suite (273 tests)
+python -m pytest                          # full test suite (286 tests)
 python -m pytest tests\test_augment.py    # specific test file
 python -m pytest -q                       # quiet output
 ```
@@ -692,7 +718,7 @@ Tests are fully isolated — they use pytest's `tmp_path` fixture for all file I
 
 **Note:** `pytest` must be installed in the venv (`pip install pytest`). It is not listed in `requirements.txt` because it is a dev-only dependency.
 
-The `test_dependencies.py` file verifies that every third-party library used by the `src/` code is importable, meets the minimum version from `requirements.txt`, and that the specific features relied upon (e.g. Conv2d, BatchNorm2d, seaborn heatmaps, ONNX Runtime sessions) work correctly with the installed versions.
+The `test_dependencies.py` file (110 tests) verifies that every third-party library used by the `src/` code is importable, meets the minimum version from `requirements.txt`, and that the specific features relied upon (e.g. `batch_first` Transformers, `label_smoothing` in CrossEntropyLoss, seaborn heatmaps, ONNX Runtime sessions) work correctly with the installed versions.
 
 ---
 
@@ -701,7 +727,11 @@ The `test_dependencies.py` file verifies that every third-party library used by 
 ```
 .
 ├── configs/
-│   └── stgcn_proto.yaml         # ST-GCN + Prototypical Network config
+│   ├── stgcn_ce.yaml            # Default config for cross-entropy training
+│   ├── stgcn_proto.yaml         # Config for prototypical few-shot training
+│   ├── pose_transformer.yaml    # Approach A defaults
+│   ├── video_classifier.yaml    # Approach B defaults
+│   └── fusion.yaml              # Approach C defaults
 ├── data/
 │   ├── raw/                     # Downloaded video files — Kaggle or URL-based (shared)
 │   ├── processed/               # Extracted keypoints as .npy (shared across variants)
@@ -714,15 +744,20 @@ The `test_dependencies.py` file verifies that every third-party library used by 
 │   ├── data/
 │   │   ├── preprocess.py        # Download, parse, extract & normalize keypoints
 │   │   ├── augment.py           # Temporal & spatial augmentations
-│   │   ├── dataset.py           # PyTorch Dataset + motion feature computation
-│   │   └── episode_sampler.py   # N-way K-shot episodic batch sampler
+│   │   └── dataset.py           # PyTorch Dataset + motion feature computation
 │   ├── models/
-│   │   ├── stgcn.py             # ST-GCN encoder (body + hand graph branches)
-│   │   └── prototypical.py      # Prototypical Network wrapper + build_model()
+│   │   ├── __init__.py          # Unified build_model() factory
+│   │   ├── stgcn.py             # ST-GCN encoder with body/hand graph branches
+│   │   ├── classifier.py        # STGCNClassifier: ST-GCN encoder + linear head
+│   │   ├── prototypical.py      # Prototypical network wrapper for few-shot
+│   │   ├── pose_transformer.py  # Transformer & BiLSTM (Approach A)
+│   │   ├── video_i3d.py         # 3D CNN backbones (Approach B)
+│   │   └── fusion.py            # Multi-modal fusion (Approach C)
 │   ├── training/
 │   │   ├── config.py            # Config dataclass + YAML serialization
-│   │   ├── train.py             # Training entry point (dispatches to prototypical)
-│   │   ├── train_prototypical.py # Episodic N-way K-shot training loop
+│   │   ├── train.py             # CLI dispatcher for training
+│   │   ├── train_ce.py          # Cross-entropy training loop
+│   │   ├── train_prototypical.py # Episodic prototypical training loop
 │   │   └── evaluate.py          # Metrics, TTA, confusion matrix
 │   └── inference/
 │       ├── predict.py           # Single-video prediction
@@ -736,12 +771,11 @@ The `test_dependencies.py` file verifies that every third-party library used by 
 │   ├── test_evaluate.py         # Metrics, TTA flip, hard negatives, latency
 │   ├── test_export_onnx.py      # ONNX export & verification
 │   ├── test_live_demo.py        # FrameBuffer, prediction smoothing
-│   ├── test_models.py           # STGCNEncoder, PrototypicalNetwork, graph construction
+│   ├── test_models.py           # PoseTransformer, PoseBiLSTM, FusionModel
 │   ├── test_predict.py          # SignPredictor inference paths
 │   ├── test_preprocess.py       # Normalization, annotation parsing, splits
-│   ├── test_train.py            # Episodic splitting helpers
-│   ├── test_auto_config.py      # Hardware detection, config generation
-│   └── test_dependencies.py    # Library version & feature compatibility
+│   ├── test_train.py            # Accuracy, mixup helpers
+│   └── test_dependencies.py    # Library version & feature compatibility (110 tests)
 ├── notebooks/
 │   ├── 01_data_exploration.ipynb
 │   ├── 02_keypoint_visualization.ipynb
@@ -772,7 +806,10 @@ All hyperparameters live in YAML files under `configs/`. The table below shows *
 To reset all config files back to the recommended defaults:
 
 ```bash
-python scripts/reset_configs.py                # reset config to defaults
+python scripts/reset_configs.py                # reset all three configs
+python scripts/reset_configs.py --only pose    # reset only pose_transformer.yaml
+python scripts/reset_configs.py --only video   # reset only video_classifier.yaml
+python scripts/reset_configs.py --only fusion  # reset only fusion.yaml
 python scripts/reset_configs.py --dry-run      # preview without writing
 ```
 
@@ -781,32 +818,34 @@ python scripts/reset_configs.py --dry-run      # preview without writing
 Detect your GPU/CPU and generate an optimized config automatically. The script probes CUDA VRAM, Apple Silicon MPS, or CPU, classifies your hardware into a performance tier, and writes a ready-to-train config:
 
 ```bash
-# Auto-detect and generate config
-python scripts/auto_config.py
+# Pose approach (recommended starting point)
+python scripts/auto_config.py --approach pose
 
-# Specify variant
-python scripts/auto_config.py --variant 300
+# Video approach
+python scripts/auto_config.py --approach video --variant 100
+
+# Fusion approach
+python scripts/auto_config.py --approach fusion --variant 300
 
 # Preview without writing
-python scripts/auto_config.py --dry-run
+python scripts/auto_config.py --approach pose --dry-run
 
 # Force CPU mode (e.g. no GPU or Apple Silicon)
-python scripts/auto_config.py --device cpu
+python scripts/auto_config.py --approach pose --device cpu
 
 # Back up existing config before overwriting
-python scripts/auto_config.py --backup
+python scripts/auto_config.py --approach pose --backup
 ```
 
 **Hardware tiers** (auto-detected from CUDA VRAM):
 
 
-| Tier     | Device    | `batch_size` | `fp16` | `n_way` | `num_episodes` | `num_workers` |
-| -------- | --------- | ------------ | ------ | ------- | -------------- | ------------- |
-| **high** | CUDA >=16 GB | 64        | true   | 20      | 500            | 8             |
-| **mid**  | CUDA >=8 GB  | 32        | true   | 20      | 500            | 4             |
-| **low**  | CUDA >=4 GB  | 16        | true   | 20      | 500            | 2             |
-| **mps**  | Apple Silicon | 16       | false  | 10      | 200            | 0             |
-| **cpu**  | CPU          | 8         | false  | 20      | 500            | 2             |
+| Tier     | VRAM      | Pose `batch_size` | Video `batch_size` | `fp16` |
+| -------- | --------- | ----------------- | ------------------ | ------ |
+| **high** | >= 16 GB  | 64                | 16                 | true   |
+| **mid**  | >= 8 GB   | 32                | 8                  | true   |
+| **low**  | >= 4 GB   | 16                | 4                  | true   |
+| **cpu**  | MPS / CPU | 8                 | 4                  | false  |
 
 
 Windows (PowerShell / Command Prompt): the commands are identical — just run them in your terminal.
@@ -830,32 +869,26 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `wlasl_variant` | Dataset size: `100`, `300`, `1000`, `2000`              | `100`   |
 | `num_classes`   | Auto-derived from `wlasl_variant` — do not set manually | `100`   |
 | `T`             | Temporal sequence length in frames                      | `64`    |
+| `image_size`    | Spatial resolution for video models (Approach B/C)      | `224`   |
 | `num_workers`   | DataLoader worker processes                             | `4`     |
 
 
-**Model (ST-GCN + Prototypical Network):**
+**Model:**
 
 
 | Parameter       | Description                                                                                           | Default            |
 | --------------- | ----------------------------------------------------------------------------------------------------- | ------------------ |
-| `approach`      | Model approach (single approach)                                                                      | `stgcn_proto`      |
+| `approach`      | `stgcn_ce`, `stgcn_proto`, `pose_transformer`, `pose_bilstm`, `video`, `fusion`                       | `stgcn_ce`         |
+| `backbone`      | Video backbone: `r2plus1d_18`, `r3d_18`, `mc3_18`, `slow_r50`, `slowfast_r50`, `x3d_m`                | `r2plus1d_18`      |
+| `pretrained`    | Use pretrained backbone weights (Approach B/C)                                                        | `true`             |
 | `num_keypoints` | Number of MediaPipe landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face)           | `543`              |
-| `gcn_channels`  | ST-GCN channel progression per block (auto-scaled per variant)                                        | `[64, 128, 128]`   |
-| `d_model`       | Embedding dimension (auto-scaled per variant: 128/192/256/384 for 100/300/1000/2000)                  | `128`              |
-| `num_layers`    | Number of ST-GCN blocks per branch                                                                    | `3`                |
-| `dropout`       | Dropout rate (auto-scaled per variant: 0.1/0.15/0.2/0.2 for 100/300/1000/2000)                       | `0.1`              |
+| `d_model`       | Transformer/LSTM embedding dimension (auto-scaled per variant: 128/192/256/384 for 100/300/1000/2000) | `128`              |
+| `nhead`         | Number of attention heads (auto-scaled per variant: 4/6/8/8 for 100/300/1000/2000)                    | `4`                |
+| `num_layers`    | Number of encoder layers (auto-scaled per variant: 2/4/5/6 for 100/300/1000/2000)                     | `2`                |
+| `dropout`       | Dropout rate (auto-scaled per variant: 0.1/0.3/0.4/0.5 for 100/300/1000/2000)                        | `0.5`              |
 | `use_motion`    | Concatenate velocity (frame differences) with position features                                       | `true`             |
-
-
-**Prototypical Training:**
-
-
-| Parameter       | Description                                                      | Default |
-| --------------- | ---------------------------------------------------------------- | ------- |
-| `n_way`         | Number of classes per episode                                    | `20`    |
-| `k_shot`        | Support samples per class per episode                            | `3`     |
-| `q_query`       | Query samples per class per episode                              | `2`     |
-| `num_episodes`  | Episodes per epoch                                               | `500`   |
+| `fusion`        | Fusion strategy: `concat` or `attention` (Approach C only)                                            | `concat`           |
+| `fusion_dim`    | Fusion layer dimension (Approach C only)                                                              | `256`              |
 
 
 **Training:**
@@ -863,16 +896,19 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 
 | Parameter                 | Description                                                      | Default    |
 | ------------------------- | ---------------------------------------------------------------- | ---------- |
-| `epochs`                  | Maximum training epochs                                          | `200`      |
+| `epochs`                  | Maximum training epochs                                          | `250`      |
 | `batch_size`              | Training batch size                                              | `32`       |
-| `lr`                      | Learning rate                                                    | `1e-3`     |
-| `weight_decay`            | AdamW weight decay                                               | `1e-4`     |
-| `warmup_epochs`           | Linear warmup epochs before scheduler takes over                 | `10`       |
+| `lr`                      | Learning rate                                                    | `3e-4`     |
+| `weight_decay`            | AdamW weight decay                                               | `5e-4`     |
+| `warmup_epochs`           | Linear warmup epochs before scheduler takes over                 | `15`       |
+| `label_smoothing`         | Label smoothing for cross-entropy loss (0 = disabled)            | `0.1`      |
 | `grad_clip`               | Max gradient norm for clipping                                   | `1.0`      |
-| `fp16`                    | Mixed-precision (FP16) training                                  | `false`    |
+| `fp16`                    | Mixed-precision (FP16) training                                  | `true`     |
 | `weighted_sampling`       | Weighted sampler to counter class imbalance                      | `false`    |
-| `early_stopping_patience` | Epochs without val improvement before stopping                   | `30`       |
-| `scheduler`               | LR scheduler: `cosine` (warmup + cosine annealing)               | `cosine`   |
+| `early_stopping_patience` | Epochs without val improvement before stopping                   | `50`       |
+| `mixup_alpha`             | Mixup interpolation strength (0 = disabled)                      | `0.2`      |
+| `head_dropout`            | Dropout before classification head (CE approach)                 | `0.3`      |
+| `scheduler`               | LR scheduler: `onecycle` or `cosine` (warmup + cosine annealing) | `cosine`   |
 
 
 **Evaluation:**
@@ -914,48 +950,30 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `resume_checkpoint` | Path to checkpoint for resuming training | `null`  |
 
 
-`num_classes` is **always** auto-derived from `wlasl_variant` (100 → 100, 300 → 300, etc.). Any explicit `num_classes` in the YAML is silently overridden — do not set it manually. Similarly, `d_model`, `gcn_channels`, and `dropout` are all auto-scaled per variant in `__post_init__`:
+`num_classes` is **always** auto-derived from `wlasl_variant` (100 → 100, 300 → 300, etc.). Any explicit `num_classes` in the YAML is silently overridden — do not set it manually. Similarly, `d_model`, `nhead`, `num_layers`, and `dropout` are all auto-scaled per variant in `__post_init__`:
 
-| Variant   | `d_model` | `gcn_channels`          | `dropout` |
-|-----------|-----------|-------------------------|-----------|
-| WLASL100  | 128       | [64, 128, 128]          | 0.1       |
-| WLASL300  | 192       | [64, 128, 256]          | 0.15      |
-| WLASL1000 | 256       | [64, 128, 256]          | 0.2       |
-| WLASL2000 | 384       | [64, 128, 256, 256]     | 0.2       |
+| Variant   | `d_model` | `nhead` | `num_layers` | `dropout` |
+|-----------|-----------|---------|--------------|-----------|
+| WLASL100  | 128       | 4       | 2            | 0.1       |
+| WLASL300  | 192       | 6       | 4            | 0.3       |
+| WLASL1000 | 256       | 8       | 5            | 0.4       |
+| WLASL2000 | 384       | 8       | 6            | 0.5       |
 
-The ST-GCN encoder partitions the 543 MediaPipe keypoints into body (33 joints), left hand (21 joints), and right hand (21 joints), each processed by a separate branch of ST-GCN blocks with skeleton-based graph adjacency. Branch outputs are concatenated and projected to `d_model` dimensions with L2 normalization.
+Dropout is intentionally low for smaller variants: a tiny model (d_model=128, 2 layers) paired with high dropout (≥0.5) applies so much regularisation that the gradient signal is crushed and the loss never decreases. The classification head uses the standard `LayerNorm → Dropout → Linear` order to avoid a train/eval distribution mismatch that arises when dropout is applied before normalisation.
 
 ---
 
-## Architecture: ST-GCN + Prototypical Network
+## Approach Details
 
-### ST-GCN Encoder
+### Approach A: Pose/Keypoint Transformer
 
-MediaPipe Holistic extracts 543 landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face), centered on the shoulder midpoint and scaled by shoulder width. Hand landmarks are further normalized relative to their respective wrist (left hand indices 33-53 relative to wrist index 33, right hand indices 54-74 relative to wrist index 54), reducing noise from absolute wrist movement while preserving wrist position in the pose landmarks (indices 15, 16). When `use_motion: true` (default), frame-to-frame velocity is concatenated with position, producing 6 features per keypoint `(x, y, z, dx, dy, dz)`.
+The recommended starting approach. MediaPipe Holistic extracts 543 landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face), centered on the shoulder midpoint and scaled by shoulder width. Hand landmarks are further normalized relative to their respective wrist (left hand indices 33-53 relative to wrist index 33, right hand indices 54-74 relative to wrist index 54), reducing noise from absolute wrist movement while preserving wrist position in the pose landmarks (indices 15, 16). When `use_motion: true` (default), frame-to-frame velocity is concatenated with position, producing 6 features per keypoint `(x, y, z, dx, dy, dz)`.
 
-The ST-GCN encoder partitions keypoints into three branches:
-- **Body** (33 joints): skeleton bone connections from MediaPipe Pose
-- **Left Hand** (21 joints): finger bone connections
-- **Right Hand** (21 joints): finger bone connections
+Both `PoseTransformer` and `PoseBiLSTM` use a **multi-stage input projection** instead of a single linear layer. The projection performs gradual dimensionality reduction: `input_dim -> intermediate_dim -> d_model` with GELU activation (where `intermediate_dim = min(input_dim // 2, d_model * 4)`). This prevents the information bottleneck that can cause training to stall when projecting from the high-dimensional input (3258 features with motion) directly to `d_model`.
 
-Each branch processes its joint partition through a stack of **STGCNBlocks** (spatial graph convolution → temporal convolution → residual → batch norm → dropout). Graph adjacency matrices are defined by natural bone connections with 2-partition spatial decomposition (self-loop + neighbor).
+**Advantages:** Lightweight, fast inference, background-invariant.
 
-Branch outputs are concatenated, projected to `d_model` dimensions via linear + LayerNorm, and L2-normalized to produce unit-length embeddings.
-
-### Prototypical Network (Few-Shot Metric Learning)
-
-Standard classification models catastrophically overfit with ~8 samples/class in WLASL. Instead, training uses **episodic metric learning**:
-
-1. Each episode samples N classes with K support + Q query samples
-2. Support samples are encoded → averaged per class to form **prototypes**
-3. Query samples are classified by nearest prototype (Euclidean distance)
-4. Loss: cross-entropy on negative distances
-
-At inference, prototypes are pre-computed from the full training set and stored. New samples are classified by distance to all prototypes.
-
-**Advantages:** Handles extreme few-shot scenarios (3–8 samples/class), background-invariant, fast inference.
-
-**Pipeline:** Video → MediaPipe → Shoulder-Centered Normalization → Hand-Relative Normalization → Motion Features → Augment → ST-GCN Encoder → Prototype Distance → Predicted Class
+**Pipeline:** Video → MediaPipe → Shoulder-Centered Normalization → Hand-Relative Normalization → Motion Features → Augment → Transformer → Softmax
 
 **Data augmentation pipeline** (training only):
 
@@ -970,7 +988,35 @@ At inference, prototypes are pre-computed from the full training set and stored.
 - Random scaling (0.9x–1.1x)
 - Keypoint dropout (frame-level and landmark-level)
 
-**Regularization:** Variant-scaled dropout (0.1 for WLASL100, up to 0.2 for WLASL2000), weight decay (1e-4), and episodic training itself acts as a strong regularizer.
+**Regularization:** Light mixup interpolation (`mixup_alpha: 0.15`), no label smoothing (avoids loss floor), variant-scaled dropout (0.1 for WLASL100, up to 0.5 for WLASL2000), weight decay (5e-4), and weighted sampling for class imbalance.
+
+### Approach B: RGB Video Classifier
+
+Uses pretrained 3D CNN backbones to classify raw video frames.
+
+**Supported backbones:** `r2plus1d_18`, `r3d_18`, `mc3_18` (torchvision), `slow_r50`, `slowfast_r50`, `x3d_m` (pytorchvideo)
+
+**Advantages:** Captures full visual context including texture and fine finger details.
+
+### Approach C: Hybrid Fusion
+
+Combines Approaches A and B. Two fusion modes:
+
+- `**concat`** — Concatenate pose and video feature vectors before the classification head.
+- `**attention**` — Cross-attention between pose tokens and video spatial features.
+
+---
+
+## Switching Between Approaches
+
+The `approach` field in your YAML config controls which model architecture and training loop are used. To switch between cross-entropy and prototypical training:
+
+1. **Change the config file:** Use `configs/stgcn_ce.yaml` for cross-entropy or `configs/stgcn_proto.yaml` for prototypical training.
+2. **Or edit the `approach` field** in your existing config:
+   - `approach: stgcn_ce` — Uses `STGCNClassifier` (ST-GCN encoder + linear head) trained with standard cross-entropy loss, label smoothing, and mixup. Best when all target classes are known at training time.
+   - `approach: stgcn_proto` — Uses `PrototypicalNetwork` (ST-GCN encoder + episodic metric learning) trained with N-way K-shot episodes. Best for few-shot classification or when you need to add new sign classes without retraining.
+
+Both approaches share the same ST-GCN encoder (`src/models/stgcn.py`) and data pipeline. The unified `build_model()` factory in `src/models/__init__.py` dispatches to the correct model based on `cfg.approach`.
 
 ---
 
@@ -993,27 +1039,22 @@ Expired WLASL URLs often return an HTML lander page (saved as `.mp4`) rather tha
 - Zero-padded keypoints for frames where detection fails are handled automatically.
 - Preprocessing uses `spawn` multiprocessing context (not `fork`) to avoid MediaPipe crashes on macOS.
 
-### MPS (Apple Silicon) Limitations
+### FP16 / AMP not supported on Apple Silicon (MPS)
 
-PyTorch's MPS backend does not support several operations used in training:
+PyTorch's Automatic Mixed Precision (`torch.amp.autocast`) does **not** support `device_type='mps'`. If you run on Apple Silicon and set `fp16: true`, training will crash with:
 
-| Issue | Symptom | Automatic fix in code |
-|-------|---------|----------------------|
-| `fp16: true` / AMP | `RuntimeError: unsupported autocast device_type 'mps'` | `auto_config.py` sets `fp16: false` for MPS |
-| `pin_memory=True` | DataLoader hangs | Disabled for non-CUDA devices |
-| `non_blocking=True` | Silent hangs on `.to(device)` | Disabled for non-CUDA devices |
-| `torch.cdist` backward | `NotImplementedError: aten::_cdist_backward` | Replaced with manual Euclidean distance |
-| `torch.einsum` (some patterns) | Training stalls indefinitely | Replaced with `torch.matmul` |
-| `num_workers > 0` | DataLoader deadlocks | Forced to `0` for MPS |
-| Large episodes (`n_way: 20`) | Metal command queue stalls | Default MPS config uses `n_way: 10`, `num_episodes: 200` |
+```
+RuntimeError: User specified an unsupported autocast device_type 'mps'
+```
 
-**Fix:** run `python scripts/auto_config.py` — it detects MPS and generates a compatible config automatically. Or use the Apple Silicon config block under [Device-Specific Configs](#2-configure).
+**Fix:** always set `fp16: false` when training on MPS (the default configs and `auto_config.py` already do this). FP16 training is only available on CUDA (NVIDIA) GPUs.
 
 ### CUDA out of memory
 
 - Reduce `batch_size` (try 8 or 4).
 - Enable `fp16: true`.
 - Reduce `T` (e.g., 32 instead of 64).
+- For video models, set `image_size: 112`.
 
 ### Webcam not detected
 
@@ -1068,7 +1109,7 @@ print(f'Classes with <=2 samples: {(counts<=2).sum()}')
 "
 ```
 
-**If effective samples < 500:** Training will be very challenging. The default `configs/stgcn_proto.yaml` is already tuned for this scenario (high dropout, weighted sampling, low LR). Expect 30–50% top-1 accuracy.
+**If effective samples < 500:** Training will be very challenging. The default `configs/pose_transformer.yaml` is already tuned for this scenario (high dropout, weighted sampling, low LR). Expect 30–50% top-1 accuracy.
 
 **To get more data:**
 
@@ -1084,103 +1125,154 @@ print(f'Classes with <=2 samples: {(counts<=2).sum()}')
 
 ## Recommended Configurations
 
-These are tuned starting points for each dataset variant. All architecture parameters are auto-scaled by `Config.__post_init__` based on `wlasl_variant`. Copy the base config and modify:
+These are tuned starting points for each dataset variant. Copy the base config and modify:
 
 ### WLASL100 (recommended starting point)
 
-~2,000 annotations, ~100 glosses. Expect 400–1,200 usable training samples depending on download availability. Uses ST-GCN + Prototypical Network with low dropout (0.1) and episodic training. Architecture is auto-scaled by `Config.__post_init__`.
+~2,000 annotations, ~100 glosses. Expect 400–1,200 usable training samples depending on download availability. Uses `stgcn_ce` (ST-GCN with cross-entropy) by default. Architecture is auto-scaled by `Config.__post_init__`.
+
+```yaml
+approach: stgcn_ce
+wlasl_variant: 100
+T: 64
+use_motion: true            # velocity features (position + frame differences)
+label_smoothing: 0.1        # cross-entropy label smoothing
+mixup_alpha: 0.2            # mixup interpolation strength
+head_dropout: 0.3           # dropout before classification head
+batch_size: 64
+lr: 3.0e-4
+scheduler: cosine
+warmup_epochs: 15
+weighted_sampling: true     # important — classes are imbalanced
+early_stopping_patience: 50
+epochs: 250
+```
+
+**Alternative: Prototypical training** (best for few-shot scenarios with ~3-8 samples/class):
 
 ```yaml
 approach: stgcn_proto
 wlasl_variant: 100
 T: 64
-use_motion: true            # velocity features (position + frame differences)
-d_model: 128                # auto-derived from wlasl_variant
-gcn_channels: [64, 128, 128]  # auto-derived from wlasl_variant
-dropout: 0.1                # auto-derived — low dropout for small model
-n_way: 20                   # classes per episode
-k_shot: 3                   # support samples per class
-q_query: 2                  # query samples per class
-num_episodes: 500           # episodes per epoch
-lr: 1.0e-3
+use_motion: true
+batch_size: 64
+lr: 3.0e-4
 scheduler: cosine
-warmup_epochs: 10
-early_stopping_patience: 30
-epochs: 200
+warmup_epochs: 15
+weighted_sampling: true
+early_stopping_patience: 50
+epochs: 250
 ```
 
-With very few training videos (<500 usable), reduce episode size:
+With very few training videos (<500 usable), reduce batch size:
 
 ```yaml
-n_way: 10
-k_shot: 2
-lr: 5.0e-4
+batch_size: 16
+lr: 1.0e-4
 ```
 
 ### WLASL300
 
-~5,000 annotations, 300 glosses. More data per class on average. Model scales up automatically (`d_model=192`, `gcn_channels=[64,128,256]`) via `Config.__post_init__`.
+~5,000 annotations, 300 glosses. More data per class on average. Model scales up automatically (`d_model=192`, `nhead=6`, `num_layers=4`) via `Config.__post_init__`.
 
 ```yaml
-approach: stgcn_proto
+approach: pose_transformer
 wlasl_variant: 300
 T: 64
 d_model: 192                # auto-derived from wlasl_variant
-gcn_channels: [64, 128, 256]  # auto-derived from wlasl_variant
-dropout: 0.15               # auto-derived
-n_way: 20
-k_shot: 3
-q_query: 2
-num_episodes: 500
-lr: 1.0e-3
+nhead: 6                    # auto-derived from wlasl_variant
+num_layers: 4               # auto-derived from wlasl_variant
+dropout: 0.3                # auto-derived
+batch_size: 32
+lr: 3.0e-4
 scheduler: cosine
-warmup_epochs: 10
-early_stopping_patience: 30
-epochs: 250
+warmup_epochs: 15
+label_smoothing: 0.0
+mixup_alpha: 0.15
+weighted_sampling: true
+early_stopping_patience: 50
+epochs: 300
 ```
 
 ### WLASL1000
 
-Much larger class count. Needs more model capacity and training time. Model scales up automatically (`d_model=256`, `gcn_channels=[64,128,256]`) via `Config.__post_init__`.
+Much larger class count. Needs more model capacity and training time. Model scales up automatically (`d_model=256`, `nhead=8`, `num_layers=5`) via `Config.__post_init__`.
 
 ```yaml
-approach: stgcn_proto
+approach: pose_transformer
 wlasl_variant: 1000
 T: 64
 d_model: 256                # auto-derived from wlasl_variant
-gcn_channels: [64, 128, 256]  # auto-derived from wlasl_variant
-dropout: 0.2                # auto-derived
-n_way: 20
-k_shot: 3
-q_query: 2
-num_episodes: 500
-lr: 1.0e-3
+nhead: 8                    # auto-derived from wlasl_variant
+num_layers: 5               # auto-derived from wlasl_variant
+dropout: 0.4                # auto-derived
+batch_size: 64
+lr: 3.0e-4
 scheduler: cosine
-warmup_epochs: 10
-early_stopping_patience: 30
-epochs: 300
+warmup_epochs: 15
+label_smoothing: 0.0
+mixup_alpha: 0.15
+weighted_sampling: true
+early_stopping_patience: 50
+epochs: 350
 ```
 
 ### WLASL2000
 
-Largest variant. Model scales up to `d_model=384`, `gcn_channels=[64,128,256,256]` via `Config.__post_init__`.
+Largest variant. Model scales up to `d_model=384`, `nhead=8`, `num_layers=6` via `Config.__post_init__`.
 
 ```yaml
-approach: stgcn_proto
+approach: pose_transformer
 wlasl_variant: 2000
 T: 64
 d_model: 384                # auto-derived from wlasl_variant
-gcn_channels: [64, 128, 256, 256]  # auto-derived from wlasl_variant
-dropout: 0.2                # auto-derived
-n_way: 20
-k_shot: 3
-q_query: 2
-num_episodes: 500
-lr: 1.0e-3
+nhead: 8                    # auto-derived from wlasl_variant
+num_layers: 6               # auto-derived from wlasl_variant
+dropout: 0.5                # auto-derived
+batch_size: 64
+lr: 3.0e-4
 scheduler: cosine
-warmup_epochs: 10
-early_stopping_patience: 30
+warmup_epochs: 15
+label_smoothing: 0.0
+mixup_alpha: 0.15
+weighted_sampling: true
+early_stopping_patience: 50
 epochs: 400
+```
+
+For WLASL2000, consider the video approach (Approach B) or fusion (Approach C) — the added visual detail helps disambiguate the larger vocabulary.
+
+### Video Classifier (Approach B)
+
+Use when you have sufficient GPU memory and want to leverage pretrained RGB features.
+
+```yaml
+approach: video
+backbone: r2plus1d_18
+pretrained: true
+T: 64                     # T=64 on high/mid GPU; reduce to 48 (low) or 32 (cpu) if needed
+image_size: 224            # reduce to 112 if GPU memory is tight
+batch_size: 8              # 3D CNNs need small batches
+lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
+dropout: 0.3
+fp16: true                 # essential for video models
+```
+
+### Fusion (Approach C)
+
+Combines Approaches A and B for highest accuracy. Requires both keypoints and raw videos.
+
+```yaml
+approach: fusion
+fusion: concat             # start with concat, try attention if concat plateaus
+fusion_dim: 256
+backbone: r2plus1d_18
+pretrained: true
+T: 64
+batch_size: 8
+lr: 1.0e-4
+dropout: 0.3
+fp16: true
 ```
 
 ---
@@ -1197,7 +1289,7 @@ batch_size: 8              # smaller batches to avoid memory pressure
 num_workers: 2
 ```
 
-The ST-GCN encoder is lightweight enough for CPU training, though it will be slower than GPU.
+Stick to Approach A (pose_transformer). Video models are too slow on CPU for training (inference is manageable).
 
 **GPU / CUDA**
 
@@ -1207,45 +1299,48 @@ batch_size: 32             # increase to fill GPU memory (or 64 for large GPUs)
 num_workers: 4
 ```
 
-Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_size` first, then `T`.
+Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_size` first, then `T`, then `image_size` (for video models).
 
-**Apple Silicon (M1/M2/M3/M4)**
+**Apple Silicon (M1/M2/M3)**
 
 - Install MediaPipe: `pip install mediapipe-silicon`
-- MPS backend is supported but has limitations: `num_workers` must be `0` (multiprocessing deadlocks), `pin_memory` and `non_blocking` are CUDA-only, `torch.cdist` backward and some `torch.einsum` patterns are unimplemented. The training code handles all of these automatically.
-- Use `n_way: 10` and `num_episodes: 200` to prevent Metal command queue stalls (the default MPS config and `auto_config.py` set these).
-- Use `--device cpu` for the live demo to avoid MPS overhead.
+- MPS backend is supported by PyTorch but gains over CPU are inconsistent for these model sizes. Use `--device cpu` for the live demo to avoid MPS overhead.
 - Preprocessing already uses `spawn` multiprocessing context to avoid macOS fork crashes.
 
 ### Training with Limited Data
 
-WLASL's expired URLs mean you may only get 30–60% of the annotated videos. The prototypical network approach is specifically designed for this scenario. When your training set is small (<500 samples for 100 classes):
+WLASL's expired URLs mean you may only get 30–60% of the annotated videos. When your training set is small (<500 samples for 100 classes):
 
-1. **Reduce `n_way`** (e.g., 10) — fewer classes per episode is easier to learn from.
-2. **Reduce `k_shot`** (e.g., 2) — if you have very few samples per class.
-3. **Download from Kaggle** (`python scripts/download_kaggle.py`) — the full ~12K video archive is available as a single download.
-4. **Enable weighted sampling** (`weighted_sampling: true`) — ensures every class is seen equally despite imbalance.
-5. **Lower the learning rate** to 5e-4 with cosine scheduler.
+1. **Enable weighted sampling** (`weighted_sampling: true`) — ensures every class is seen equally despite imbalance.
+2. **Increase dropout** to 0.5 to reduce overfitting (WLASL-specific research uses 0.5–0.7 for ~6–8 samples/class).
+3. **Increase label smoothing** to 0.15–0.2 for better calibration.
+4. **Use smaller batch sizes** (8–16) so the model sees more update steps per epoch.
+5. **Lower the learning rate** to 1e-4 with cosine scheduler.
+6. **Try BiLSTM** (`approach: pose_bilstm`) — fewer parameters, less prone to overfitting on tiny datasets.
+7. **Download from Kaggle** (`python scripts/download_kaggle.py`) — the full ~12K video archive is available as a single download.
 
 ### Improving Accuracy
 
+- **Start with Approach A** (pose_transformer). It trains fastest and is easiest to debug.
 - **Enable motion features** (`use_motion: true`) — velocity information captures signing dynamics and typically adds 5–8% accuracy.
+- **Use light mixup** (`mixup_alpha: 0.15`) — regularizes training without preventing confident predictions. Higher values floor the loss.
+- **Disable label smoothing** (`label_smoothing: 0.0`) — label smoothing creates an artificial loss floor (~0.23 for 100 classes). Remove it for lowest loss.
 - **Enable TTA for evaluation** (`use_tta: true`) — averages predictions over original + horizontally flipped input for 2–4% evaluation boost.
-- **Increase `num_episodes`** (e.g., 1000) — more episodes per epoch gives more diverse training signal.
-- **Use cosine scheduler** (`scheduler: cosine`) — cosine annealing with warm-up converges best for episodic training.
-- **Increase sequence length** (`T: 96` or `T: 128`) if signs in your dataset are long — some signs take 3+ seconds at 64 fps (the default frame extraction rate).
 - **Use the error analysis notebook** (`notebooks/03_error_analysis.ipynb`) to find which classes are confused, then inspect those videos manually.
+- **Use cosine scheduler** (`scheduler: cosine`) — cosine annealing with warm-up converges better than onecycle for long training runs.
+- **Increase sequence length** (`T: 96` or `T: 128`) if signs in your dataset are long — some signs take 3+ seconds at 64 fps (the default frame extraction rate).
+- **Scale up to fusion** (Approach C) once you've maxed out Approach A's accuracy — it typically adds 3–8% top-1 over pose-only.
 
 ### What to Expect
 
 Realistic accuracy ranges depend heavily on how many videos you have:
 
 
-| Dataset  | Training Samples | Expected Top-1 |
-| -------- | ---------------- | --------------- |
-| WLASL100 | 400–800          | 30–50%          |
-| WLASL100 | 800–1,500        | 45–60%          |
-| WLASL300 | 2,000–4,000      | 35–50%          |
+| Dataset  | Training Samples | Approach A (expected) | Approach C (expected) |
+| -------- | ---------------- | --------------------- | --------------------- |
+| WLASL100 | 400–800          | 45–60% top-1          | 55–68% top-1          |
+| WLASL100 | 800–1,500        | 60–70% top-1          | 68–78% top-1          |
+| WLASL300 | 2,000–4,000      | 45–55% top-1          | 55–65% top-1          |
 
 
 If your val loss is around `ln(num_classes)` (e.g., 4.6 for 100 classes), the model is near random — check that enough training samples are being loaded.
@@ -1257,7 +1352,7 @@ If your val loss is around `ln(num_classes)` (e.g., 4.6 for 100 classes), the mo
 3. **Wrong video count**: The official WLASL download scripts fetch ALL ~21,000 videos (all 2,000 glosses), not just your target variant. The preprocessing pipeline filters to the correct subset.
 4. **MediaPipe warnings**: `inference_feedback_manager.cc` warnings are harmless TFLite logs. Suppress with `GLOG_minloglevel=2 python ...` (Linux/macOS) or `$env:GLOG_minloglevel=2; python ...` (Windows PowerShell) or `set GLOG_minloglevel=2 && python ...` (Windows cmd).
 5. **Empty val set**: If the val split CSV has very few rows, some classes may have zero val samples. This makes early stopping and accuracy metrics unreliable — check row counts after preprocessing: `wc -l data/splits/WLASL100/*.csv` (Linux/macOS) or `Get-ChildItem data\splits\WLASL100\*.csv | ForEach-Object { Write-Host "$($_.Name): $((Get-Content $_).Count)" }` (Windows PowerShell).
-6. **Scheduler mismatch on resume**: If you resume training from a checkpoint with a different total step count, the cosine scheduler can go out of range. Start fresh if you changed `epochs` or `num_episodes`.
+6. **OneCycleLR NaN loss**: If you resume training from a checkpoint with a different total step count, the scheduler can go out of range. Start fresh or use `scheduler: cosine` for resumed runs.
 
 ---
 
@@ -1310,8 +1405,8 @@ Check your CUDA version with `nvidia-smi` (top-right corner shows the maximum CU
 | `opencv-python`  | `>=4.8.0,<4.11.0`  | Video I/O and frame capture. Webcam access requires system camera permissions.                          |
 | `numpy`          | `>=1.24.0,<2.1.0`  | NumPy 2.x introduced breaking changes — stay below 2.1 for compatibility with all dependencies.         |
 | `onnxruntime`    | `>=1.16.0,<1.20.0` | For ONNX export verification. Use `onnxruntime-gpu` instead if you want GPU-accelerated ONNX inference. |
-| `pytorchvideo`   | `>=0.1.5,<0.2.0`   | Video processing utilities. Optional dependency.                                                        |
-| `albumentations` | `>=1.3.1,<1.5.0`   | Image augmentation utilities. Optional dependency.                                                      |
+| `pytorchvideo`   | `>=0.1.5,<0.2.0`   | SlowFast and X3D backbones (Approach B). Only needed if using video models.                             |
+| `albumentations` | `>=1.3.1,<1.5.0`   | Image augmentations for video frame preprocessing (Approach B/C).                                       |
 | `kaggle`         | `>=1.6.0,<1.8.0`   | Kaggle API for dataset download. Only needed if using `scripts/download_kaggle.py`.                     |
 
 

@@ -55,7 +55,7 @@ WLASL/
 .claude/agent-memory/
 .claude/agents/
 .claude/settings.local.json
-
+.claude/worktrees
 # Wandb
 wandb/
 

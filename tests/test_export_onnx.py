@@ -3,8 +3,7 @@
 import pytest
 import torch
 
-from src.models.stgcn import STGCNEncoder
-from src.models.prototypical import PrototypicalNetwork, build_model
+from src.models import build_model
 from src.training.config import Config
 
 NUM_KP = 543
@@ -22,12 +21,13 @@ def _onnxruntime_available() -> bool:
 class TestExportOnnx:
     def _make_model_and_cfg(self, use_motion=False):
         cfg = Config(
-            approach="stgcn_proto",
+            approach="stgcn_ce",
             num_keypoints=NUM_KP,
+            num_classes=10,
             wlasl_variant=10,
             d_model=64,
-            gcn_channels=[32, 64],
             dropout=0.0,
+            head_dropout=0.0,
             T=16,
             use_motion=use_motion,
         )

@@ -4,8 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.models.stgcn import STGCNEncoder
-from src.models.prototypical import PrototypicalNetwork, build_model
+from src.models import build_model
 from src.training.config import Config
 
 
@@ -20,46 +19,21 @@ class TestPredictFromKeypoints:
         from src.inference.predict import SignPredictor
 
         cfg = Config(
-            approach="stgcn_proto",
+            approach="stgcn_ce",
             num_keypoints=NUM_KP,
+            num_classes=10,
             wlasl_variant=10,
-            d_model=64,
-            gcn_channels=[32, 64],
-            dropout=0.0,
-            use_motion=use_motion,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
             T=16,
+            use_motion=use_motion,
         )
         model = build_model(cfg)
-
-        # Compute fake prototypes so classify works
-        data = torch.randn(20, 16, NUM_KP * (6 if use_motion else 3))
-        labels = torch.tensor([i % 10 for i in range(20)])
-        from torch.utils.data import DataLoader, TensorDataset
-        ds = TensorDataset(data, labels)
-        loader = DataLoader(ds, batch_size=10)
-        model.compute_prototypes(loader)
-
         ckpt_path = tmp_path / "model.pt"
         torch.save({"model_state_dict": model.state_dict()}, str(ckpt_path))
 
         class_names = [f"sign_{i}" for i in range(10)]
-
-        # Create dummy train CSV so _load_prototypes can find it
-        splits_dir = tmp_path / "data" / "splits" / "WLASL10"
-        splits_dir.mkdir(parents=True)
-        processed_dir = tmp_path / "data" / "processed"
-        processed_dir.mkdir(parents=True)
-
-        import pandas as pd
-        rows = []
-        for i in range(20):
-            vid = f"vid_{i:03d}"
-            rows.append({"video_id": vid, "label_idx": i % 10, "gloss": f"sign_{i % 10}"})
-            kps = np.random.rand(30, NUM_KP, 3).astype(np.float32)
-            np.save(str(processed_dir / f"{vid}.npy"), kps)
-        pd.DataFrame(rows).to_csv(splits_dir / "train.csv", index=False)
-
-        cfg.data_dir = str(tmp_path / "data")
         predictor = SignPredictor(
             checkpoint_path=ckpt_path, cfg=cfg, device="cpu",
             class_names=class_names,
@@ -111,3 +85,49 @@ class TestPredictFromKeypoints:
         result = predictor.predict_keypoints(npy_path)
         for _, prob in result["top5"]:
             assert 0.0 <= prob <= 1.0
+
+
+class TestPredictCE:
+    """Test SignPredictor with the stgcn_ce approach (no prototypes needed)."""
+
+    def _make_ce_predictor(self, tmp_path):
+        """Create an STGCNClassifier checkpoint and build a SignPredictor."""
+        from src.inference.predict import SignPredictor
+        from src.models.classifier import build_classifier
+
+        cfg = Config(
+            approach="stgcn_ce",
+            num_keypoints=NUM_KP,
+            num_classes=10,
+            wlasl_variant=10,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
+            T=16,
+            use_motion=False,
+        )
+        model = build_classifier(cfg)
+        ckpt_path = tmp_path / "ce_model.pt"
+        torch.save({"model_state_dict": model.state_dict()}, str(ckpt_path))
+
+        class_names = [f"sign_{i}" for i in range(10)]
+        predictor = SignPredictor(
+            checkpoint_path=ckpt_path, cfg=cfg, device="cpu",
+            class_names=class_names,
+        )
+        return predictor
+
+    def test_ce_predict_keypoints(self, tmp_path):
+        """STGCNClassifier predictor works without prototypes."""
+        predictor = self._make_ce_predictor(tmp_path)
+        kps = np.random.rand(30, NUM_KP, 3).astype(np.float32)
+        npy_path = tmp_path / "sample_ce.npy"
+        np.save(str(npy_path), kps)
+
+        result = predictor.predict_keypoints(npy_path)
+        assert "gloss" in result
+        assert "confidence" in result
+        assert "top5" in result
+        assert "label_idx" in result
+        assert len(result["top5"]) == 5
+        assert 0.0 <= result["confidence"] <= 1.0

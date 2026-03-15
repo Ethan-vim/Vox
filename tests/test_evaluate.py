@@ -13,8 +13,6 @@ from src.training.evaluate import (
     find_hard_negatives,
     plot_confusion_matrix,
 )
-from src.models.prototypical import PrototypicalNetwork
-from src.models.stgcn import STGCNEncoder
 
 NUM_KP = 543
 
@@ -60,17 +58,19 @@ class TestFlipKeypointsTensor:
 
 class TestComputeMetrics:
     def _make_model_and_loader(self, num_classes=5, num_samples=20):
-        """Create a prototypical model with pre-set prototypes and DataLoader."""
-        encoder = STGCNEncoder(
-            num_keypoints=NUM_KP, embedding_dim=64,
-            channels=[32, 64], dropout=0.0,
-        )
-        model = PrototypicalNetwork(encoder)
-        model.prototypes = torch.randn(num_classes, 64)
-        model._num_classes = num_classes
+        """Create a simple model and DataLoader for testing."""
+        class SimpleModel(nn.Module):
+            def __init__(self, in_dim, num_classes):
+                super().__init__()
+                self.fc = nn.Linear(in_dim, num_classes)
+            def forward(self, x):
+                return self.fc(x.mean(dim=1))
+
+        in_dim = NUM_KP * 3
+        model = SimpleModel(in_dim, num_classes)
         model.eval()
 
-        data = torch.randn(num_samples, 16, NUM_KP * 3)
+        data = torch.randn(num_samples, 16, in_dim)
         labels = torch.randint(0, num_classes, (num_samples,))
         dataset = TensorDataset(data, labels)
         loader = DataLoader(dataset, batch_size=4)
@@ -117,6 +117,40 @@ class TestComputeMetrics:
         )
         assert "top1" in result
 
+    def test_stgcn_classifier_metrics(self):
+        """compute_metrics works with an STGCNClassifier (CE approach)."""
+        from src.models.stgcn import build_stgcn_encoder
+        from src.models.classifier import STGCNClassifier
+        from src.training.config import Config
+
+        cfg = Config(
+            approach="stgcn_ce",
+            num_keypoints=NUM_KP,
+            num_classes=5,
+            wlasl_variant=10,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
+            T=16,
+            use_motion=False,
+        )
+        encoder = build_stgcn_encoder(cfg)
+        model = STGCNClassifier(encoder, num_classes=5, dropout=0.1)
+        model.eval()
+
+        num_samples = 10
+        data = torch.randn(num_samples, 16, NUM_KP * 3)
+        labels = torch.randint(0, 5, (num_samples,))
+        dataset = TensorDataset(data, labels)
+        loader = DataLoader(dataset, batch_size=4)
+        class_names = [f"sign_{i}" for i in range(5)]
+
+        device = torch.device("cpu")
+        result = compute_metrics(model, loader, device, class_names)
+        assert "top1" in result
+        assert "top5" in result
+        assert 0.0 <= result["top1"] <= 100.0
+
 
 # ---------------------------------------------------------------------------
 # find_hard_negatives
@@ -157,29 +191,17 @@ class TestFindHardNegatives:
 
 class TestEvaluateLatency:
     def test_returns_expected_keys(self):
-        encoder = STGCNEncoder(
-            num_keypoints=NUM_KP, embedding_dim=64,
-            channels=[32, 64], dropout=0.0,
-        )
-        model = PrototypicalNetwork(encoder)
-        model.prototypes = torch.randn(5, 64)
-        model._num_classes = 5
+        model = nn.Linear(100, 10)
         model.eval()
-        result = evaluate_latency(model, torch.device("cpu"), (16, NUM_KP * 3), n_runs=5)
+        result = evaluate_latency(model, torch.device("cpu"), (100,), n_runs=5)
         assert "mean_ms" in result
         assert "std_ms" in result
         assert "fps" in result
 
     def test_latency_positive(self):
-        encoder = STGCNEncoder(
-            num_keypoints=NUM_KP, embedding_dim=64,
-            channels=[32, 64], dropout=0.0,
-        )
-        model = PrototypicalNetwork(encoder)
-        model.prototypes = torch.randn(5, 64)
-        model._num_classes = 5
+        model = nn.Linear(100, 10)
         model.eval()
-        result = evaluate_latency(model, torch.device("cpu"), (16, NUM_KP * 3), n_runs=5)
+        result = evaluate_latency(model, torch.device("cpu"), (100,), n_runs=5)
         assert result["mean_ms"] > 0
         assert result["fps"] > 0
 

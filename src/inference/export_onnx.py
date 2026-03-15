@@ -1,10 +1,9 @@
 """
 ONNX export, verification, and benchmarking for trained models.
 
-Exports the ST-GCN encoder to ONNX format, verifies the exported model's
+Exports a PyTorch model to ONNX format, verifies the exported model's
 structure and output shape via ONNX Runtime, and benchmarks inference
-latency.  Note: prototypes are stored separately (not part of the ONNX
-graph) and must be loaded at inference time.
+latency.
 """
 
 import argparse
@@ -15,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.models.prototypical import build_model
+from src.models import build_model
 from src.training.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -27,30 +26,53 @@ def export_to_onnx(
     output_path: str | Path,
     opset: int = 17,
 ) -> Path:
-    """Export the ST-GCN encoder to ONNX format.
+    """Export a PyTorch model to ONNX format.
 
-    The exported model takes keypoint sequences and produces embeddings.
-    Prototype-based classification is done outside the ONNX graph.
+    Parameters
+    ----------
+    model : nn.Module
+        Trained model (already in eval mode on CPU).
+    cfg : Config
+        Configuration (used to determine input shape).
+    output_path : str or Path
+        Destination ``.onnx`` file.
+    opset : int
+        ONNX opset version.
+
+    Returns
+    -------
+    Path
+        Path to the saved ONNX file.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    encoder = model.encoder if hasattr(model, "encoder") else model
-    encoder.eval()
-    encoder.cpu()
+    model.eval()
+    model.cpu()
 
+    # For stgcn approaches, determine which part of the model to export
+    export_model = model
+    if cfg.approach in ("stgcn_proto", "stgcn_ce"):
+        if hasattr(model, 'head'):
+            # STGCNClassifier — export the full model (encoder + head)
+            export_model = model
+        elif hasattr(model, 'encoder'):
+            # PrototypicalNetwork — export encoder only (prototypes stored separately)
+            export_model = model.encoder
+
+    # Create dummy input
     features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
     dummy_input = torch.randn(1, cfg.T, cfg.num_keypoints * features_per_kp)
     input_names = ["keypoints"]
-    dynamic_axes = {"keypoints": {0: "batch_size"}, "embedding": {0: "batch_size"}}
+    dynamic_axes = {"keypoints": {0: "batch_size"}, "logits": {0: "batch_size"}}
 
     torch.onnx.export(
-        encoder,
+        export_model,
         dummy_input,
         str(output_path),
         opset_version=opset,
         input_names=input_names,
-        output_names=["embedding"],
+        output_names=["logits"],
         dynamic_axes=dynamic_axes,
         do_constant_folding=True,
     )
@@ -64,26 +86,53 @@ def verify_onnx(
     cfg: Config,
     atol: float = 1e-4,
 ) -> bool:
-    """Verify an ONNX model's structure and output shape."""
+    """Verify an ONNX model's structure and output shape.
+
+    Validates the ONNX model with ``onnx.checker``, runs a random input
+    through ONNX Runtime, and asserts the output shape matches
+    ``(1, num_classes)``.
+
+    Parameters
+    ----------
+    onnx_path : str or Path
+        Path to the ONNX model.
+    cfg : Config
+        Configuration.
+    atol : float
+        Reserved for future numerical comparison (currently unused).
+
+    Returns
+    -------
+    bool
+        True if verification passes.
+
+    Raises
+    ------
+    AssertionError
+        If the output shape does not match expectations.
+    """
     import onnx
     import onnxruntime as ort
 
     onnx_path = Path(onnx_path)
 
+    # Validate ONNX model structure
     model = onnx.load(str(onnx_path))
     onnx.checker.check_model(model)
     logger.info("ONNX model structure check passed")
 
+    # Create dummy input
     features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
     dummy = np.random.randn(1, cfg.T, cfg.num_keypoints * features_per_kp).astype(np.float32)
+    input_name = "keypoints"
 
+    # Run ONNX Runtime
     session = ort.InferenceSession(str(onnx_path))
-    ort_output = session.run(None, {"keypoints": dummy})[0]
+    ort_output = session.run(None, {input_name: dummy})[0]
 
     logger.info("ONNX output shape: %s", ort_output.shape)
-    expected_dim = getattr(cfg, "embedding_dim", cfg.d_model)
-    assert ort_output.shape == (1, expected_dim), (
-        f"Expected output shape (1, {expected_dim}), got {ort_output.shape}"
+    assert ort_output.shape == (1, cfg.num_classes), (
+        f"Expected output shape (1, {cfg.num_classes}), got {ort_output.shape}"
     )
 
     logger.info("ONNX verification passed (output shape correct)")
@@ -95,11 +144,27 @@ def benchmark_onnx(
     cfg: Config,
     n_runs: int = 100,
 ) -> dict[str, float]:
-    """Benchmark inference latency of an ONNX model."""
+    """Benchmark inference latency of an ONNX model.
+
+    Parameters
+    ----------
+    onnx_path : str or Path
+        Path to the ONNX model.
+    cfg : Config
+        Configuration (for input shape).
+    n_runs : int
+        Number of inference runs to average.
+
+    Returns
+    -------
+    dict[str, float]
+        Keys: ``mean_ms``, ``std_ms``, ``min_ms``, ``max_ms``, ``fps``.
+    """
     import onnxruntime as ort
 
     onnx_path = Path(onnx_path)
 
+    # Session options for optimal CPU performance
     sess_opts = ort.SessionOptions()
     sess_opts.inter_op_num_threads = 1
     sess_opts.intra_op_num_threads = 4
@@ -107,16 +172,20 @@ def benchmark_onnx(
 
     session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts)
 
+    # Create dummy input
     features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
     dummy = np.random.randn(1, cfg.T, cfg.num_keypoints * features_per_kp).astype(np.float32)
+    input_name = "keypoints"
 
+    # Warm-up
     for _ in range(10):
-        session.run(None, {"keypoints": dummy})
+        session.run(None, {input_name: dummy})
 
+    # Benchmark
     times_ms: list[float] = []
     for _ in range(n_runs):
         t0 = time.perf_counter()
-        session.run(None, {"keypoints": dummy})
+        session.run(None, {input_name: dummy})
         t1 = time.perf_counter()
         times_ms.append((t1 - t0) * 1000.0)
 
@@ -132,9 +201,16 @@ def benchmark_onnx(
 
     logger.info(
         "ONNX Latency: %.1f ms (std=%.1f) | FPS: %.1f",
-        result["mean_ms"], result["std_ms"], result["fps"],
+        result["mean_ms"],
+        result["std_ms"],
+        result["fps"],
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
@@ -155,18 +231,22 @@ if __name__ == "__main__":
     cfg = load_config(args.config)
     device = torch.device("cpu")
 
+    # Build and load model
     model = build_model(cfg)
+
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     state_dict = ckpt["model_state_dict"]
-    # Remove prototypes from checkpoint — they'll be recomputed from training data
     state_dict.pop("prototypes", None)
     model.load_state_dict(state_dict, strict=False)
     model.eval()
 
+    # Export
     onnx_path = export_to_onnx(model, cfg, args.output, opset=args.opset)
 
+    # Verify
     if args.verify:
         verify_onnx(onnx_path, cfg)
 
+    # Benchmark
     if args.benchmark:
         benchmark_onnx(onnx_path, cfg)
