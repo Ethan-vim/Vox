@@ -23,6 +23,7 @@ from src.data.preprocess import (
     normalize_keypoints,
     NUM_KEYPOINTS,
 )
+from src.models import build_model
 from src.models.pose_transformer import build_pose_model
 from src.models.video_i3d import build_video_model
 from src.training.config import Config, load_config
@@ -61,7 +62,9 @@ class SignPredictor:
         self.class_names = class_names
 
         # Build model
-        if cfg.approach in ("pose_transformer", "pose_bilstm"):
+        if cfg.approach in ("stgcn_proto", "stgcn_ce"):
+            self.model = build_model(cfg)
+        elif cfg.approach in ("pose_transformer", "pose_bilstm"):
             self.model = build_pose_model(cfg)
         elif cfg.approach == "video":
             self.model = build_video_model(cfg)
@@ -71,12 +74,20 @@ class SignPredictor:
         # Load checkpoint
         checkpoint_path = Path(checkpoint_path)
         ckpt = torch.load(str(checkpoint_path), map_location=self.device, weights_only=False)
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        state_dict = ckpt["model_state_dict"]
+        state_dict.pop("prototypes", None)
+        self.model.load_state_dict(state_dict, strict=False)
         self.model.to(self.device)
         self.model.eval()
 
+        # Compute prototypes for prototypical models
+        if hasattr(self.model, 'compute_prototypes'):
+            self._load_prototypes(cfg)
+
         # Transforms for keypoint preprocessing
         self.transform = get_val_transforms(T=cfg.T)
+
+        self._use_classify = hasattr(self.model, 'classify')
 
         logger.info(
             "Loaded model from %s (approach=%s, device=%s)",
@@ -84,6 +95,29 @@ class SignPredictor:
             cfg.approach,
             self.device,
         )
+
+    def _load_prototypes(self, cfg: Config) -> None:
+        """Compute prototypes from the training set for prototypical models."""
+        from src.data.dataset import WLASLKeypointDataset, get_dataloader
+
+        data_dir = Path(cfg.data_dir)
+        train_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / "train.csv"
+        if not train_csv.exists():
+            logger.warning("Training CSV not found at %s; skipping prototype computation", train_csv)
+            return
+        train_dataset = WLASLKeypointDataset(
+            split_csv=train_csv,
+            keypoint_dir=data_dir / "processed",
+            transform=self.transform,
+            T=cfg.T,
+            use_motion=getattr(cfg, "use_motion", False),
+        )
+        proto_loader = get_dataloader(
+            train_dataset, batch_size=cfg.batch_size, shuffle=False,
+            num_workers=getattr(cfg, "num_workers", 0),
+        )
+        self.model.compute_prototypes(proto_loader)
+        logger.info("Prototypes computed from training set")
 
     def predict(self, video_path: str | Path) -> dict:
         """Run prediction on a video file.
@@ -107,7 +141,7 @@ class SignPredictor:
         if not video_path.exists():
             raise FileNotFoundError(f"Video not found: {video_path}")
 
-        if self.cfg.approach in ("pose_transformer", "pose_bilstm"):
+        if self.cfg.approach in ("stgcn_proto", "stgcn_ce", "pose_transformer", "pose_bilstm"):
             # Extract keypoints on the fly
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as tmp:
@@ -169,7 +203,10 @@ class SignPredictor:
         tensor = torch.from_numpy(keypoints).float().unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            logits = self.model(tensor)  # (1, num_classes)
+            if self._use_classify:
+                logits = self.model.classify(tensor)
+            else:
+                logits = self.model(tensor)  # (1, num_classes)
             probs = F.softmax(logits, dim=1).squeeze(0)  # (num_classes,)
 
         return self._format_result(probs)

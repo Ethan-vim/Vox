@@ -29,6 +29,7 @@ from src.data.dataset import (
     WLASLFusionDataset,
     get_dataloader,
 )
+from src.models import build_model as build_stgcn_model
 from src.models.pose_transformer import build_pose_model
 from src.models.video_i3d import build_video_model
 from src.models.fusion import build_fusion_model
@@ -117,6 +118,9 @@ def compute_metrics(
         ``predictions``, ``targets``.
     """
     model.eval()
+    use_classify = hasattr(model, 'classify')
+    _infer = model.classify if use_classify else model
+
     all_preds: list[int] = []
     all_targets: list[int] = []
     all_probs: list[np.ndarray] = []
@@ -130,12 +134,12 @@ def compute_metrics(
         else:
             inputs = batch[0].to(device, non_blocking=True)
             targets = batch[1].to(device, non_blocking=True)
-            logits = model(inputs)
+            logits = _infer(inputs)
 
             # Test-Time Augmentation: average logits from original + h-flipped
             if use_tta and approach != "fusion":
                 flipped = _flip_keypoints_tensor(inputs, num_keypoints=num_keypoints)
-                logits_flip = model(flipped)
+                logits_flip = _infer(flipped)
                 logits = (logits + logits_flip) / 2.0
 
         probs = torch.softmax(logits, dim=1)
@@ -385,7 +389,9 @@ def evaluate_latency(
 
 def _build_model(cfg: Config, device: torch.device) -> nn.Module:
     """Build and load a model from checkpoint."""
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
+    if cfg.approach in ("stgcn_proto", "stgcn_ce"):
+        model = build_stgcn_model(cfg)
+    elif cfg.approach in ("pose_transformer", "pose_bilstm"):
         model = build_pose_model(cfg)
     elif cfg.approach == "video":
         model = build_video_model(cfg)
@@ -440,14 +446,16 @@ def main() -> None:
     # Build and load model
     model = _build_model(cfg, device)
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt["model_state_dict"])
+    state_dict = ckpt["model_state_dict"]
+    state_dict.pop("prototypes", None)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
 
     # Build dataset
     data_dir = Path(cfg.data_dir)
     split_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / f"{args.split}.csv"
 
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
+    if cfg.approach in ("stgcn_proto", "stgcn_ce", "pose_transformer", "pose_bilstm"):
         transform = get_val_transforms(T=cfg.T)
         dataset = WLASLKeypointDataset(
             split_csv=split_csv,
@@ -478,6 +486,23 @@ def main() -> None:
         raise ValueError(f"Unknown approach '{cfg.approach}'")
 
     loader = get_dataloader(dataset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
+
+    # Compute prototypes for prototypical models (stgcn_proto)
+    if hasattr(model, 'compute_prototypes'):
+        train_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / "train.csv"
+        train_transform = get_val_transforms(T=cfg.T)
+        train_dataset = WLASLKeypointDataset(
+            split_csv=train_csv,
+            keypoint_dir=data_dir / "processed",
+            transform=train_transform,
+            T=cfg.T,
+            use_motion=getattr(cfg, "use_motion", False),
+        )
+        proto_loader = get_dataloader(
+            train_dataset, batch_size=cfg.batch_size, shuffle=False,
+            num_workers=cfg.num_workers,
+        )
+        model.compute_prototypes(proto_loader)
 
     # Build class names from all available split CSVs for complete coverage
     import pandas as pd
@@ -518,7 +543,7 @@ def main() -> None:
         logger.info("  %s -> %s (%d times)", true_cls, pred_cls, count)
 
     # Latency benchmark (skipped for fusion — requires dual inputs)
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
+    if cfg.approach in ("stgcn_proto", "stgcn_ce", "pose_transformer", "pose_bilstm"):
         features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
         input_shape = (cfg.T, cfg.num_keypoints * features_per_kp)
         latency = evaluate_latency(model, device, input_shape)
