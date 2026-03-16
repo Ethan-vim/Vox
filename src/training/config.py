@@ -87,6 +87,16 @@ class Config:
     buffer_size: int = 64
     fps_display: bool = True
 
+    # --- Inference (sign detection) ---
+    min_buffer_frames: int = 30  # Minimum real frames before prediction
+    prediction_cooldown: float = 1.0  # Seconds to wait after a confident prediction
+    motion_start_threshold: float = 0.005  # Hand velocity to detect sign start
+    motion_end_threshold: float = 0.003  # Hand velocity to detect sign end
+    motion_settle_frames: int = 8  # Low-velocity frames to confirm sign end
+    max_sign_duration: int = 90  # Max frames before forcing sign completion (~3s at 30fps)
+    static_sign_timeout: int = 45  # Idle frames with buffer data before static prediction
+    inference_poll_interval: float = 0.1  # Seconds between inference loop checks
+
     # --- Resume ---
     resume_checkpoint: Optional[str] = None
 

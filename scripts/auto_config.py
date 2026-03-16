@@ -255,6 +255,14 @@ def build_config_values(
         "confidence_threshold": 0.6,
         "smoothing_window": 5,
         "fps_display": True,
+        "min_buffer_frames": 30,
+        "prediction_cooldown": 1.0,
+        "motion_start_threshold": 0.005,
+        "motion_end_threshold": 0.003,
+        "motion_settle_frames": 8,
+        "max_sign_duration": 90,
+        "static_sign_timeout": 45,
+        "inference_poll_interval": 0.1,
         "data_dir": "data",
         "output_dir": "outputs",
         "checkpoint_dir": "checkpoints",
@@ -367,6 +375,22 @@ early_stopping_patience: {values['early_stopping_patience']}
 scheduler: {values['scheduler']}
 num_workers: {values['num_workers']}
 
+# Inference
+confidence_threshold: {values['confidence_threshold']}
+smoothing_window: {values['smoothing_window']}
+buffer_size: {values['buffer_size']}
+fps_display: {_bool(values['fps_display'])}
+
+# Sign detection
+min_buffer_frames: {values['min_buffer_frames']}
+prediction_cooldown: {values['prediction_cooldown']}
+motion_start_threshold: {values['motion_start_threshold']}
+motion_end_threshold: {values['motion_end_threshold']}
+motion_settle_frames: {values['motion_settle_frames']}
+max_sign_duration: {values['max_sign_duration']}
+static_sign_timeout: {values['static_sign_timeout']}
+inference_poll_interval: {values['inference_poll_interval']}
+
 # Paths
 data_dir: {values['data_dir']}
 checkpoint_dir: {values['checkpoint_dir']}
@@ -420,6 +444,16 @@ confidence_threshold: {values['confidence_threshold']}
 smoothing_window: {values['smoothing_window']}
 buffer_size: {values['buffer_size']}
 fps_display: {_bool(values['fps_display'])}
+
+# Sign detection
+min_buffer_frames: {values['min_buffer_frames']}
+prediction_cooldown: {values['prediction_cooldown']}
+motion_start_threshold: {values['motion_start_threshold']}
+motion_end_threshold: {values['motion_end_threshold']}
+motion_settle_frames: {values['motion_settle_frames']}
+max_sign_duration: {values['max_sign_duration']}
+static_sign_timeout: {values['static_sign_timeout']}
+inference_poll_interval: {values['inference_poll_interval']}
 
 # Paths
 data_dir: {values['data_dir']}

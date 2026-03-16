@@ -89,6 +89,119 @@ class FrameBuffer:
 
 
 # ---------------------------------------------------------------------------
+# Motion detector
+# ---------------------------------------------------------------------------
+
+
+class MotionDetector:
+    """Detects sign start/end by tracking hand keypoint velocity.
+
+    Uses a state machine (IDLE -> SIGNING -> COMPLETED) to determine
+    when a sign has been completed before triggering inference.
+
+    Parameters
+    ----------
+    cfg : Config
+        Configuration with motion detection thresholds.
+    """
+
+    # Hand keypoint indices in the 543-keypoint array (left: 33-53, right: 54-74)
+    HAND_START = 33
+    HAND_END = 75
+
+    def __init__(self, cfg: "Config") -> None:
+        self.start_threshold = cfg.motion_start_threshold
+        self.end_threshold = cfg.motion_end_threshold
+        self.settle_frames = cfg.motion_settle_frames
+        self.max_duration = cfg.max_sign_duration
+        self.static_timeout = cfg.static_sign_timeout
+
+        self._state = "IDLE"
+        self._prev_hand_kps: Optional[np.ndarray] = None
+        self._signing_frames = 0
+        self._settle_count = 0
+        self._idle_frames = 0
+
+    @property
+    def state(self) -> str:
+        """Current state: IDLE, SIGNING, or COMPLETED."""
+        return self._state
+
+    @property
+    def idle_duration(self) -> int:
+        """Number of consecutive idle frames."""
+        return self._idle_frames
+
+    def _hand_velocity(self, keypoints: np.ndarray) -> float:
+        """Compute mean L2 velocity of hand keypoints from previous frame.
+
+        Parameters
+        ----------
+        keypoints : np.ndarray
+            Shape ``(NUM_KEYPOINTS, 3)`` for a single frame.
+
+        Returns
+        -------
+        float
+            Mean L2 displacement across the 42 hand keypoints.
+        """
+        hand_kps = keypoints[self.HAND_START:self.HAND_END]
+        if self._prev_hand_kps is None:
+            self._prev_hand_kps = hand_kps.copy()
+            return 0.0
+        displacement = np.linalg.norm(hand_kps - self._prev_hand_kps, axis=1)
+        self._prev_hand_kps = hand_kps.copy()
+        return float(np.mean(displacement))
+
+    def update(self, keypoints: np.ndarray) -> str:
+        """Ingest a new frame and return the current state.
+
+        Parameters
+        ----------
+        keypoints : np.ndarray
+            Shape ``(NUM_KEYPOINTS, 3)`` for the latest frame.
+
+        Returns
+        -------
+        str
+            Current state after processing: IDLE, SIGNING, or COMPLETED.
+        """
+        vel = self._hand_velocity(keypoints)
+
+        if self._state == "IDLE":
+            if vel >= self.start_threshold:
+                self._state = "SIGNING"
+                self._signing_frames = 1
+                self._settle_count = 0
+                self._idle_frames = 0
+            else:
+                self._idle_frames += 1
+
+        elif self._state == "SIGNING":
+            self._signing_frames += 1
+
+            if vel < self.end_threshold:
+                self._settle_count += 1
+            else:
+                self._settle_count = 0
+
+            if self._settle_count >= self.settle_frames:
+                self._state = "COMPLETED"
+            elif self._signing_frames >= self.max_duration:
+                self._state = "COMPLETED"
+
+        return self._state
+
+    def reset(self) -> None:
+        """Reset to IDLE state and clear all history."""
+        self._state = "IDLE"
+        self._prev_hand_kps = None
+        self._signing_frames = 0
+        self._settle_count = 0
+        self._idle_frames = 0
+
+
+# ---------------------------------------------------------------------------
 # Live predictor
 # ---------------------------------------------------------------------------
 
@@ -231,7 +344,8 @@ class LivePredictor:
         """
         keypoints = buffer.get_all()  # (N, 543, 3)
 
-        if keypoints.shape[0] < 5:
+        min_frames = getattr(self.cfg, "min_buffer_frames", 30)
+        if keypoints.shape[0] < min_frames:
             return None
 
         # Normalize
@@ -239,7 +353,7 @@ class LivePredictor:
 
         # Pad/crop to T frames
         T = self.cfg.T
-        N = keypoints.shape[0]
+        N = keypoints.shape[0]  # real frame count before padding
         if N < T:
             pad = np.tile(keypoints[-1:], (T - N, 1, 1))
             keypoints = np.concatenate([keypoints, pad], axis=0)
@@ -268,11 +382,17 @@ class LivePredictor:
         top5_probs = top5_probs.cpu().numpy()
         top5_indices = top5_indices.cpu().numpy()
 
+        # Scale confidence by buffer fill ratio to penalize partial sequences
+        buffer_fill_ratio = min(1.0, N / T)
+
         pred_idx = int(top5_indices[0])
-        confidence = float(top5_probs[0])
+        confidence = float(top5_probs[0]) * buffer_fill_ratio
         gloss = self.class_names[pred_idx] if pred_idx < len(self.class_names) else str(pred_idx)
         top5 = [
-            (self.class_names[int(i)] if int(i) < len(self.class_names) else str(i), float(p))
+            (
+                self.class_names[int(i)] if int(i) < len(self.class_names) else str(i),
+                float(p) * buffer_fill_ratio,
+            )
             for i, p in zip(top5_indices, top5_probs)
         ]
 
@@ -281,6 +401,7 @@ class LivePredictor:
             "confidence": confidence,
             "label_idx": pred_idx,
             "top5": top5,
+            "buffer_fill_ratio": buffer_fill_ratio,
         }
 
     @staticmethod
@@ -572,22 +693,55 @@ def run_demo(
     current_prediction: Optional[dict] = None
     current_confidence: float = 0.0
     current_top5: Optional[list] = None
+    current_motion_state: str = "IDLE"
     recent_predictions: list[dict] = []
     last_mp_results: Optional[object] = None
     inference_lock = threading.Lock()
+    motion_lock = threading.Lock()
     running = True
     saved_predictions: list[str] = []
+
+    # Motion detector
+    motion_detector = MotionDetector(cfg)
 
     # FPS tracking
     frame_times: collections.deque[float] = collections.deque(maxlen=30)
 
-    # Inference thread
+    # Inference thread — motion-aware with cooldown
     def inference_loop() -> None:
         nonlocal current_prediction, current_confidence, current_top5, recent_predictions
+        cooldown_until = 0.0
+        poll_interval = getattr(cfg, "inference_poll_interval", 0.1)
+
         while running:
-            time.sleep(0.5)  # Run inference every 0.5 seconds
+            time.sleep(poll_interval)
             if not running:
                 break
+
+            now = time.time()
+
+            # Respect cooldown after a confident prediction
+            if now < cooldown_until:
+                continue
+
+            # Read motion state (set by main thread)
+            with motion_lock:
+                state = current_motion_state
+                idle_dur = motion_detector.idle_duration
+            buf_len = len(buffer)
+
+            # Decide whether to run inference
+            should_infer = False
+            if state == "COMPLETED":
+                should_infer = True
+            elif buf_len >= cfg.buffer_size:
+                should_infer = True
+            elif state == "IDLE" and buf_len >= getattr(cfg, "min_buffer_frames", 30):
+                if idle_dur >= getattr(cfg, "static_sign_timeout", 45):
+                    should_infer = True
+
+            if not should_infer:
+                continue
 
             result = predictor.predict_buffer(buffer)
             if result is None:
@@ -595,7 +749,6 @@ def run_demo(
 
             with inference_lock:
                 recent_predictions.append(result)
-                # Keep only the last N predictions for smoothing
                 if len(recent_predictions) > cfg.smoothing_window:
                     recent_predictions = recent_predictions[-cfg.smoothing_window:]
 
@@ -604,6 +757,13 @@ def run_demo(
                     current_prediction = smoothed
                     current_confidence = smoothed["confidence"]
                     current_top5 = smoothed.get("top5")
+
+                    # Post-prediction cooldown
+                    buffer.clear()
+                    with motion_lock:
+                        motion_detector.reset()
+                    recent_predictions.clear()
+                    cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
                 else:
                     current_prediction = None
                     current_confidence = 0.0
@@ -633,9 +793,12 @@ def run_demo(
 
             t0 = time.perf_counter()
 
-            # Extract keypoints
+            # Extract keypoints and feed motion detector
             kps, mp_results = predictor.preprocess_frame(frame)
             buffer.push(kps)
+            with motion_lock:
+                m_state = motion_detector.update(kps)
+                current_motion_state = m_state
             last_mp_results = mp_results
 
             # Get current prediction (thread-safe read)
@@ -670,15 +833,21 @@ def run_demo(
                     cv2.LINE_AA,
                 )
 
-            # Buffer status
+            # Buffer status and motion state
             buf_len = len(buffer)
+            state_colors = {
+                "IDLE": (150, 150, 150),
+                "SIGNING": (0, 200, 255),
+                "COMPLETED": (0, 255, 0),
+            }
+            state_color = state_colors.get(m_state, (150, 150, 150))
             cv2.putText(
                 frame,
-                f"Buffer: {buf_len}/{cfg.buffer_size}",
+                f"Buffer: {buf_len}/{cfg.buffer_size}  [{m_state}]",
                 (20, frame.shape[0] - 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                (150, 150, 150),
+                state_color,
                 1,
                 cv2.LINE_AA,
             )

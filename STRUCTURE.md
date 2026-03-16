@@ -136,7 +136,7 @@ The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.appro
 | Module | Key Classes / Functions | Imports From |
 |--------|------------------------|--------------|
 | `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `models` |
-| `live_demo.py` | `FrameBuffer`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `models` |
+| `live_demo.py` | `FrameBuffer`, `MotionDetector`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `models` |
 | `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `models` |
 
 ---
@@ -202,13 +202,18 @@ Single Video (predict.py):
 
 Live Demo (live_demo.py):
 
-  Webcam ──> FrameBuffer(T=64) ──> MediaPipe ──> normalize (shoulder+hand-relative) ──> velocity ──> model
-    │              │                                                          │
-    │         rolls every                                                     v
-    │         0.5 seconds                                                predictions
-    │                                                                         │
-    v                                                                         v
-  Display <───── overlay predicted gloss + confidence (smoothed over 5 windows)
+  Webcam ──> MediaPipe ──> FrameBuffer(T=64) ──> MotionDetector
+    │                           │                      │
+    │                           │              state: IDLE/SIGNING/COMPLETED
+    │                           │                      │
+    │                           │              [sign complete OR buffer full OR static timeout]
+    │                           │                      │
+    │                           v                      v
+    │                     normalize ──> pad/crop ──> confidence scaling ──> model
+    │                                                                        │
+    v                                                                        v
+  Display <───── overlay predicted gloss + confidence + motion state
+                 (smoothed over 5 windows, cooldown after prediction)
 
 
 ONNX Export (export_onnx.py):
@@ -292,7 +297,7 @@ Each test file maps to one or more source modules:
 | `test_dataset.py` | `src/data/dataset.py` — Dataset, DataLoader, pad/crop, motion features |
 | `test_evaluate.py` | `src/training/evaluate.py` — metrics, TTA, hard negatives, latency |
 | `test_export_onnx.py` | `src/inference/export_onnx.py` — ONNX export and verification |
-| `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, prediction smoothing |
+| `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, MotionDetector, prediction smoothing |
 | `test_models.py` | `src/models/` — STGCNEncoder, STGCNClassifier, PrototypicalNetwork, normalize_embeddings |
 | `test_predict.py` | `src/inference/predict.py` — SignPredictor inference paths |
 | `test_preprocess.py` | `src/data/preprocess.py` — normalization, annotation parsing, splits |
