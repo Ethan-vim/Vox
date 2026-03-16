@@ -107,12 +107,14 @@ class TestSTGCNClassifier:
         linear_layers = [m for m in model.head if isinstance(m, nn.Linear)]
         assert len(linear_layers) == 2
 
-    def test_head_has_batchnorm(self):
-        """Enhanced head should include BatchNorm1d."""
+    def test_head_has_layernorm(self):
+        """Classification head should use LayerNorm (not BatchNorm) to avoid mode collapse."""
         cfg = self._make_cfg()
         model = build_classifier(cfg)
+        ln_layers = [m for m in model.head if isinstance(m, nn.LayerNorm)]
+        assert len(ln_layers) == 1
         bn_layers = [m for m in model.head if isinstance(m, nn.BatchNorm1d)]
-        assert len(bn_layers) == 1
+        assert len(bn_layers) == 0
 
 
 # ---------------------------------------------------------------------------

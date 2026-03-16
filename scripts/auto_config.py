@@ -201,6 +201,7 @@ def build_config_values(
             "label_smoothing": 0.0,
             "mixup_alpha": 0.0,
             "head_dropout": 0.2,
+            "class_weighted_loss": True,
             "num_workers": 4,
             "batch_size": 32,
             "lr": 1e-3,
@@ -361,6 +362,7 @@ normalize_embeddings: {_bool(values['normalize_embeddings'])}
 label_smoothing: {values['label_smoothing']}
 mixup_alpha: {values['mixup_alpha']}
 head_dropout: {values['head_dropout']}
+class_weighted_loss: {_bool(values['class_weighted_loss'])}
 
 # Training
 epochs: {values['epochs']}

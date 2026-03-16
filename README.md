@@ -878,6 +878,7 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `early_stopping_patience` | Epochs without val improvement before stopping                   | `50`       |
 | `mixup_alpha`             | Mixup interpolation strength (0 = disabled)                      | `0.0`      |
 | `head_dropout`            | Dropout before classification head (CE approach)                 | `0.2`      |
+| `class_weighted_loss`     | Inverse-frequency class weights in CE loss (prevents class collapse) | `true`  |
 | `scheduler`               | LR scheduler: `onecycle` or `cosine` (warmup + cosine annealing) | `cosine`   |
 
 
@@ -943,7 +944,7 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | WLASL1000 | 256       | 8       | 5            | 0.4       |
 | WLASL2000 | 384       | 8       | 6            | 0.5       |
 
-Dropout is intentionally low for smaller variants: a tiny model (d_model=128, 2 layers) paired with high dropout (≥0.5) applies so much regularisation that the gradient signal is crushed and the loss never decreases. The classification head uses a two-layer architecture: `Linear → BatchNorm1d → ReLU → Dropout → Linear` for a nonlinear decision surface.
+Dropout is intentionally low for smaller variants: a tiny model (d_model=128, 2 layers) paired with high dropout (≥0.5) applies so much regularisation that the gradient signal is crushed and the loss never decreases. The classification head uses a two-layer architecture: `Linear → LayerNorm → ReLU → Dropout → Linear` for a nonlinear decision surface. LayerNorm is used instead of BatchNorm to avoid mode collapse with small per-class batch representation.
 
 ---
 
@@ -961,7 +962,7 @@ The ST-GCN encoder processes keypoints through separate body (33 landmarks) and 
 
 ### Cross-Entropy (`stgcn_ce`)
 
-Standard classification with an enhanced two-layer head (`Linear → BN → ReLU → Dropout → Linear`). Uses `normalize_embeddings: false` so encoder outputs are unconstrained (important — L2 normalization caps logit magnitudes and causes loss plateaus).
+Standard classification with an enhanced two-layer head (`Linear → LayerNorm → ReLU → Dropout → Linear`). Uses `normalize_embeddings: false` so encoder outputs are unconstrained (important — L2 normalization caps logit magnitudes and causes loss plateaus).
 
 **CE-specific augmentation** (milder than proto to avoid over-regularization with small datasets):
 
