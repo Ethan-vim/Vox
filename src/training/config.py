@@ -67,6 +67,7 @@ class Config:
     early_stopping_patience: int = 15
     mixup_alpha: float = 0.2  # Mixup interpolation parameter (0 = disabled)
     head_dropout: float = 0.3  # Dropout for classification head (stgcn_ce approach)
+    class_weighted_loss: bool = True  # Inverse-frequency class weights in CE loss
 
     # --- Scheduler ---
     scheduler: str = "onecycle"  # onecycle or cosine

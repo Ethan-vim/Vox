@@ -278,7 +278,16 @@ def main(cfg: Config) -> None:
     model = build_classifier(cfg).to(device)
 
     # Loss
-    criterion = nn.CrossEntropyLoss(label_smoothing=cfg.label_smoothing)
+    if getattr(cfg, "class_weighted_loss", True):
+        class_counts = np.bincount(train_ds.labels, minlength=cfg.num_classes).astype(np.float32)
+        class_counts = np.maximum(class_counts, 1.0)  # avoid division by zero
+        class_weights = 1.0 / class_counts
+        class_weights = class_weights / class_weights.sum() * cfg.num_classes
+        loss_weight = torch.from_numpy(class_weights).float().to(device)
+        logger.info("Using class-weighted CE loss (weight range: %.2f - %.2f)", loss_weight.min(), loss_weight.max())
+    else:
+        loss_weight = None
+    criterion = nn.CrossEntropyLoss(weight=loss_weight, label_smoothing=cfg.label_smoothing)
 
     # Optimizer
     optimizer = torch.optim.AdamW(

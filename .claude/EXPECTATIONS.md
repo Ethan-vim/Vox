@@ -13,6 +13,9 @@ When the user sends the agent a clear error that has happened when running somet
 the agent should follow by solving that error and replying clearly with what the agent did to codebase to fix it,
 what files has been changed, etc.
 
+Your mistakes should also not be repeated.  Always spend extra time on tasks.  
+When fixing a error or making a improvement in the codebase.  All solutions or causes should be found and analyzed for the best solution or all solutions.
+
 ### Examples
 
 For example,

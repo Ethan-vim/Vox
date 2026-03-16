@@ -14,7 +14,7 @@ class STGCNClassifier(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Sequential(
             nn.Linear(encoder.embedding_dim, encoder.embedding_dim),
-            nn.BatchNorm1d(encoder.embedding_dim),
+            nn.LayerNorm(encoder.embedding_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(encoder.embedding_dim, num_classes),

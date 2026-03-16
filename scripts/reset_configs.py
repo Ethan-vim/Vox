@@ -47,6 +47,7 @@ normalize_embeddings: false
 label_smoothing: 0.0
 mixup_alpha: 0.0
 head_dropout: 0.2
+class_weighted_loss: true
 
 # Training
 epochs: 200
