@@ -11,7 +11,7 @@ from src.training.config import Config, load_config, save_config
 class TestConfigDefaults:
     def test_default_values(self):
         cfg = Config()
-        assert cfg.approach == "pose_transformer"
+        assert cfg.approach == "stgcn_ce"
         assert cfg.num_keypoints == 543
         assert cfg.T == 64
         assert cfg.num_classes == 100
@@ -62,11 +62,15 @@ class TestConfigDefaults:
 
     def test_mixup_alpha_default(self):
         cfg = Config()
-        assert cfg.mixup_alpha == 0.4
+        assert cfg.mixup_alpha == 0.2
 
     def test_use_tta_default(self):
         cfg = Config()
         assert cfg.use_tta is False
+
+    def test_normalize_embeddings_default(self):
+        cfg = Config()
+        assert cfg.normalize_embeddings is True
 
 
 class TestLoadConfig:
@@ -85,7 +89,7 @@ class TestLoadConfig:
 
     def test_load_full_yaml(self, tmp_config_yaml):
         cfg = load_config(tmp_config_yaml)
-        assert cfg.approach == "pose_transformer"
+        assert cfg.approach == "stgcn_ce"
         assert cfg.T == 16
         assert cfg.d_model == 64
 

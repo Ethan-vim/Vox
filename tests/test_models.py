@@ -1,13 +1,13 @@
-"""Tests for src.models — PoseTransformer, PoseBiLSTM, FusionModel, build functions."""
+"""Tests for src.models — ST-GCN encoder, prototypical network, classifier, and unified build_model."""
 
 import pytest
 import torch
+import torch.nn as nn
 
-from src.models.pose_transformer import (
-    PoseBiLSTM,
-    PoseTransformer,
-    build_pose_model,
-)
+from src.models.stgcn import STGCNEncoder, build_stgcn_encoder
+from src.models.prototypical import PrototypicalNetwork
+from src.models.classifier import STGCNClassifier, build_classifier
+from src.models import build_model
 from src.training.config import Config
 
 
@@ -16,191 +16,140 @@ B, T = 2, 16
 
 
 # ---------------------------------------------------------------------------
-# PoseTransformer
+# STGCNClassifier
 # ---------------------------------------------------------------------------
 
 
-class TestPoseTransformer:
-    def test_forward_shape(self):
-        model = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64, nhead=4,
-            num_layers=2, T=T, use_motion=False,
-        )
-        x = torch.randn(B, T, NUM_KP * 3)
-        out = model(x)
-        assert out.shape == (B, 10)
-
-    def test_forward_with_motion(self):
-        model = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64, nhead=4,
-            num_layers=2, T=T, use_motion=True,
-        )
-        x = torch.randn(B, T, NUM_KP * 6)
-        out = model(x)
-        assert out.shape == (B, 10)
-
-    def test_get_features(self):
-        model = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64, nhead=4,
-            num_layers=2, T=T,
-        )
-        x = torch.randn(B, T, NUM_KP * 3)
-        feat = model.get_features(x)
-        assert feat.shape == (B, 64)
-
-    def test_variable_seq_length(self):
-        model = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64, nhead=4,
-            num_layers=2, T=32,
-        )
-        # Input shorter than T should still work
-        x = torch.randn(B, 8, NUM_KP * 3)
-        out = model(x)
-        assert out.shape == (B, 10)
-
-
-# ---------------------------------------------------------------------------
-# PoseBiLSTM
-# ---------------------------------------------------------------------------
-
-
-class TestPoseBiLSTM:
-    def test_forward_shape(self):
-        model = PoseBiLSTM(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64,
-            num_layers=2, T=T, use_motion=False,
-        )
-        x = torch.randn(B, T, NUM_KP * 3)
-        out = model(x)
-        assert out.shape == (B, 10)
-
-    def test_forward_with_motion(self):
-        model = PoseBiLSTM(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64,
-            num_layers=2, T=T, use_motion=True,
-        )
-        x = torch.randn(B, T, NUM_KP * 6)
-        out = model(x)
-        assert out.shape == (B, 10)
-
-    def test_get_features(self):
-        model = PoseBiLSTM(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64,
-            num_layers=2, T=T,
-        )
-        x = torch.randn(B, T, NUM_KP * 3)
-        feat = model.get_features(x)
-        assert feat.shape == (B, 64)
-
-
-# ---------------------------------------------------------------------------
-# build_pose_model
-# ---------------------------------------------------------------------------
-
-
-class TestBuildPoseModel:
-    def test_build_transformer(self):
-        cfg = Config(
-            approach="pose_transformer", num_keypoints=NUM_KP, num_classes=10,
+class TestSTGCNClassifier:
+    def _make_cfg(self, **overrides):
+        """Create a minimal Config for ST-GCN classifier tests."""
+        defaults = dict(
+            approach="stgcn_ce",
+            num_keypoints=NUM_KP,
+            num_classes=10,
             wlasl_variant=10,
-            d_model=64, nhead=4, num_layers=2, T=T, use_motion=False,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
+            T=T,
+            use_motion=False,
         )
-        model = build_pose_model(cfg)
-        assert isinstance(model, PoseTransformer)
+        defaults.update(overrides)
+        return Config(**defaults)
+
+    def test_forward_shape(self):
+        """STGCNClassifier output has shape (B, num_classes)."""
+        cfg = self._make_cfg()
+        encoder = build_stgcn_encoder(cfg)
+        model = STGCNClassifier(encoder, num_classes=10, dropout=0.1)
+        x = torch.randn(B, T, NUM_KP * 3)
+        out = model(x)
+        assert out.shape == (B, 10)
+
+    def test_classify_matches_forward(self):
+        """classify() returns same as forward()."""
+        cfg = self._make_cfg()
+        encoder = build_stgcn_encoder(cfg)
+        model = STGCNClassifier(encoder, num_classes=10, dropout=0.1)
+        model.eval()
+        x = torch.randn(B, T, NUM_KP * 3)
+        with torch.no_grad():
+            out_fwd = model(x)
+            out_cls = model.classify(x)
+        torch.testing.assert_close(out_fwd, out_cls)
+
+    def test_build_classifier_from_config(self):
+        """build_classifier creates model from config."""
+        cfg = self._make_cfg()
+        model = build_classifier(cfg)
+        assert isinstance(model, STGCNClassifier)
+        assert model.num_classes == 10
+        model.eval()
         x = torch.randn(1, T, NUM_KP * 3)
-        assert model(x).shape == (1, 10)
+        out = model(x)
+        assert out.shape == (1, 10)
 
-    def test_build_bilstm(self):
-        cfg = Config(
-            approach="pose_bilstm", num_keypoints=NUM_KP, num_classes=10,
-            wlasl_variant=10,
-            d_model=64, num_layers=2, T=T, use_motion=False,
-        )
-        model = build_pose_model(cfg)
-        assert isinstance(model, PoseBiLSTM)
+    def test_unified_build_model_ce(self):
+        """build_model dispatches to classifier for stgcn_ce."""
+        cfg = self._make_cfg(approach="stgcn_ce")
+        model = build_model(cfg)
+        assert isinstance(model, STGCNClassifier)
 
-    def test_build_with_motion(self):
-        cfg = Config(
-            approach="pose_transformer", num_keypoints=NUM_KP, num_classes=10,
-            wlasl_variant=10,
-            d_model=64, nhead=4, num_layers=2, T=T, use_motion=True,
-        )
-        model = build_pose_model(cfg)
-        x = torch.randn(1, T, NUM_KP * 6)
-        assert model(x).shape == (1, 10)
-
-    def test_unknown_approach_raises(self):
-        cfg = Config(approach="unknown_model")
-        with pytest.raises(ValueError, match="Unknown pose approach"):
-            build_pose_model(cfg)
+    def test_unified_build_model_proto(self):
+        """build_model dispatches to prototypical for stgcn_proto."""
+        cfg = self._make_cfg(approach="stgcn_proto")
+        model = build_model(cfg)
+        assert isinstance(model, PrototypicalNetwork)
 
     def test_model_is_differentiable(self):
-        cfg = Config(
-            approach="pose_transformer", num_keypoints=NUM_KP, num_classes=10,
-            wlasl_variant=10,
-            d_model=64, nhead=4, num_layers=2, T=T, use_motion=False,
-        )
-        model = build_pose_model(cfg)
-        x = torch.randn(1, T, NUM_KP * 3)
+        """Classifier model supports backprop."""
+        cfg = self._make_cfg()
+        model = build_classifier(cfg)
+        x = torch.randn(B, T, NUM_KP * 3)
         out = model(x)
         loss = out.sum()
         loss.backward()
-        # Check at least one parameter has gradients
         has_grad = any(p.grad is not None for p in model.parameters())
         assert has_grad
 
-
-# ---------------------------------------------------------------------------
-# FusionModel (basic smoke test, avoids heavy video backbone download)
-# ---------------------------------------------------------------------------
-
-
-class TestFusionModel:
-    def test_concat_fusion(self):
-        from src.models.fusion import CrossAttentionFusion, FusionModel
-
-        # Build minimal pose model
-        pose = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=32,
-            nhead=4, num_layers=1, T=T,
-        )
-        # Mock a simple video model with get_features
-        class DummyVideoModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.feat_dim = 64
-                self.fc = torch.nn.Linear(64, 64)
-            def get_features(self, x):
-                return torch.randn(x.size(0), self.feat_dim)
-            def forward(self, x):
-                return self.fc(self.get_features(x))
-
-        video = DummyVideoModel()
-        fusion = FusionModel(pose, video, num_classes=10, fusion="concat")
-        pose_input = torch.randn(B, T, NUM_KP * 3)
-        video_input = torch.randn(B, 3, T, 112, 112)
-        out = fusion(pose_input, video_input)
+    def test_forward_with_motion(self):
+        """STGCNClassifier works with motion features (6 channels per keypoint)."""
+        cfg = self._make_cfg(use_motion=True)
+        model = build_classifier(cfg)
+        x = torch.randn(B, T, NUM_KP * 6)
+        out = model(x)
         assert out.shape == (B, 10)
 
-    def test_attention_fusion(self):
-        from src.models.fusion import FusionModel
+    def test_head_has_two_linear_layers(self):
+        """Enhanced head should have two Linear layers."""
+        cfg = self._make_cfg()
+        model = build_classifier(cfg)
+        linear_layers = [m for m in model.head if isinstance(m, nn.Linear)]
+        assert len(linear_layers) == 2
 
-        pose = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=32,
-            nhead=4, num_layers=1, T=T,
-        )
-        class DummyVideoModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.feat_dim = 64
-            def get_features(self, x):
-                return torch.randn(x.size(0), self.feat_dim)
-            def forward(self, x):
-                return self.get_features(x)
+    def test_head_has_batchnorm(self):
+        """Enhanced head should include BatchNorm1d."""
+        cfg = self._make_cfg()
+        model = build_classifier(cfg)
+        bn_layers = [m for m in model.head if isinstance(m, nn.BatchNorm1d)]
+        assert len(bn_layers) == 1
 
-        video = DummyVideoModel()
-        fusion = FusionModel(pose, video, num_classes=10, fusion="attention", fusion_dim=32)
-        pose_input = torch.randn(B, T, NUM_KP * 3)
-        video_input = torch.randn(B, 3, T, 112, 112)
-        out = fusion(pose_input, video_input)
-        assert out.shape == (B, 10)
+
+# ---------------------------------------------------------------------------
+# STGCNEncoder normalize_embeddings
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeEmbeddings:
+    def test_normalized_by_default(self):
+        """Default encoder produces L2-normalized outputs."""
+        encoder = STGCNEncoder(num_keypoints=NUM_KP, embedding_dim=32)
+        encoder.eval()
+        x = torch.randn(B, T, NUM_KP * 3)
+        with torch.no_grad():
+            emb = encoder(x)
+        norms = emb.norm(dim=1)
+        torch.testing.assert_close(norms, torch.ones(B), atol=1e-5, rtol=1e-5)
+
+    def test_unnormalized_when_disabled(self):
+        """Encoder with normalize_embeddings=False does NOT produce unit-norm."""
+        encoder = STGCNEncoder(num_keypoints=NUM_KP, embedding_dim=32, normalize_embeddings=False)
+        encoder.eval()
+        x = torch.randn(B, T, NUM_KP * 3)
+        with torch.no_grad():
+            emb = encoder(x)
+        norms = emb.norm(dim=1)
+        # Should NOT all be 1.0
+        assert not torch.allclose(norms, torch.ones(B), atol=1e-3)
+
+    def test_build_reads_config_flag(self):
+        """build_stgcn_encoder reads normalize_embeddings from config."""
+        cfg = Config(approach="stgcn_ce", normalize_embeddings=False, wlasl_variant=10, num_classes=10)
+        encoder = build_stgcn_encoder(cfg)
+        assert encoder.normalize_embeddings is False
+
+    def test_build_defaults_to_true(self):
+        """build_stgcn_encoder defaults normalize_embeddings to True."""
+        cfg = Config(approach="stgcn_proto", wlasl_variant=10, num_classes=10)
+        encoder = build_stgcn_encoder(cfg)
+        assert encoder.normalize_embeddings is True

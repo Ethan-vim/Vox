@@ -16,6 +16,7 @@ from src.data.augment import (
     TemporalFlip,
     TemporalSpeedPerturb,
     _build_swap_indices,
+    get_ce_train_transforms,
     get_train_transforms,
     get_val_transforms,
 )
@@ -401,3 +402,51 @@ class TestPipelinePresets:
                 break
         else:
             pytest.fail("KeypointNoise not found in training pipeline")
+
+
+# ---------------------------------------------------------------------------
+# CE-specific pipeline presets
+# ---------------------------------------------------------------------------
+
+
+class TestCETrainTransforms:
+    def test_returns_compose(self):
+        pipeline = get_ce_train_transforms(T=32)
+        assert isinstance(pipeline, Compose)
+
+    def test_no_temporal_flip(self):
+        """CE pipeline must NOT include TemporalFlip (reversing a sign changes meaning)."""
+        pipeline = get_ce_train_transforms(T=32)
+        has_flip = any(isinstance(t, TemporalFlip) for t in pipeline.transforms)
+        assert not has_flip, "CE pipeline should NOT contain TemporalFlip"
+
+    def test_has_nine_transforms(self):
+        pipeline = get_ce_train_transforms(T=32)
+        assert len(pipeline.transforms) == 9
+
+    def test_output_shape(self):
+        pipeline = get_ce_train_transforms(T=32)
+        kps = _kps(T=50)
+        result = pipeline(kps)
+        assert result.shape[0] == 32
+
+    def test_milder_noise(self):
+        """CE pipeline uses sigma=0.01 (milder than proto's 0.02)."""
+        pipeline = get_ce_train_transforms(T=32)
+        for t in pipeline.transforms:
+            if isinstance(t, KeypointNoise):
+                assert t.sigma == 0.01
+                break
+        else:
+            pytest.fail("KeypointNoise not found in CE pipeline")
+
+    def test_milder_dropout(self):
+        """CE pipeline uses lower frame/landmark dropout rates."""
+        pipeline = get_ce_train_transforms(T=32)
+        for t in pipeline.transforms:
+            if isinstance(t, KeypointDropout):
+                assert t.frame_drop_rate == 0.05
+                assert t.landmark_drop_rate == 0.03
+                break
+        else:
+            pytest.fail("KeypointDropout not found in CE pipeline")

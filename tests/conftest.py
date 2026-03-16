@@ -70,7 +70,7 @@ def tmp_config_yaml(tmp_path):
     """Write a minimal YAML config file and return its path."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
-        "approach: pose_transformer\n"
+        "approach: stgcn_ce\n"
         "wlasl_variant: 10\n"
         "T: 16\n"
         "d_model: 64\n"
@@ -82,3 +82,40 @@ def tmp_config_yaml(tmp_path):
         "use_tta: false\n"
     )
     return cfg_path
+
+
+@pytest.fixture
+def tmp_config_yaml_ce(tmp_path, tmp_dataset):
+    """Write a minimal CE config YAML for testing."""
+    csv_path, kp_dir = tmp_dataset
+    data_dir = csv_path.parent.parent  # splits/ -> tmp_path
+    config_path = tmp_path / "test_config_ce.yaml"
+    config_path.write_text(
+        f"approach: stgcn_ce\n"
+        f"wlasl_variant: 100\n"
+        f"num_keypoints: 543\n"
+        f"T: 16\n"
+        f"use_motion: false\n"
+        f"d_model: 32\n"
+        f"gcn_channels: [16, 32]\n"
+        f"num_layers: 2\n"
+        f"dropout: 0.1\n"
+        f"embedding_dim: 32\n"
+        f"label_smoothing: 0.1\n"
+        f"mixup_alpha: 0.2\n"
+        f"head_dropout: 0.3\n"
+        f"epochs: 1\n"
+        f"batch_size: 4\n"
+        f"lr: 0.001\n"
+        f"weight_decay: 0.0001\n"
+        f"warmup_epochs: 0\n"
+        f"grad_clip: 1.0\n"
+        f"fp16: false\n"
+        f"weighted_sampling: false\n"
+        f"early_stopping_patience: 5\n"
+        f"scheduler: cosine\n"
+        f"num_workers: 0\n"
+        f"data_dir: {data_dir}\n"
+        f"checkpoint_dir: {tmp_path / 'checkpoints'}\n"
+    )
+    return str(config_path)

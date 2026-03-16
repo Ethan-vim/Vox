@@ -117,6 +117,40 @@ class TestComputeMetrics:
         )
         assert "top1" in result
 
+    def test_stgcn_classifier_metrics(self):
+        """compute_metrics works with an STGCNClassifier (CE approach)."""
+        from src.models.stgcn import build_stgcn_encoder
+        from src.models.classifier import STGCNClassifier
+        from src.training.config import Config
+
+        cfg = Config(
+            approach="stgcn_ce",
+            num_keypoints=NUM_KP,
+            num_classes=5,
+            wlasl_variant=10,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
+            T=16,
+            use_motion=False,
+        )
+        encoder = build_stgcn_encoder(cfg)
+        model = STGCNClassifier(encoder, num_classes=5, dropout=0.1)
+        model.eval()
+
+        num_samples = 10
+        data = torch.randn(num_samples, 16, NUM_KP * 3)
+        labels = torch.randint(0, 5, (num_samples,))
+        dataset = TensorDataset(data, labels)
+        loader = DataLoader(dataset, batch_size=4)
+        class_names = [f"sign_{i}" for i in range(5)]
+
+        device = torch.device("cpu")
+        result = compute_metrics(model, loader, device, class_names)
+        assert "top1" in result
+        assert "top5" in result
+        assert 0.0 <= result["top1"] <= 100.0
+
 
 # ---------------------------------------------------------------------------
 # find_hard_negatives

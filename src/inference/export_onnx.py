@@ -14,8 +14,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.models.pose_transformer import build_pose_model
-from src.models.video_i3d import build_video_model
+from src.models import build_model
 from src.training.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -51,21 +50,24 @@ def export_to_onnx(
     model.eval()
     model.cpu()
 
+    # For stgcn approaches, determine which part of the model to export
+    export_model = model
+    if cfg.approach in ("stgcn_proto", "stgcn_ce"):
+        if hasattr(model, 'head'):
+            # STGCNClassifier — export the full model (encoder + head)
+            export_model = model
+        elif hasattr(model, 'encoder'):
+            # PrototypicalNetwork — export encoder only (prototypes stored separately)
+            export_model = model.encoder
+
     # Create dummy input
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
-        dummy_input = torch.randn(1, cfg.T, cfg.num_keypoints * features_per_kp)
-        input_names = ["keypoints"]
-        dynamic_axes = {"keypoints": {0: "batch_size"}, "logits": {0: "batch_size"}}
-    elif cfg.approach == "video":
-        dummy_input = torch.randn(1, 3, cfg.T, cfg.image_size, cfg.image_size)
-        input_names = ["video"]
-        dynamic_axes = {"video": {0: "batch_size"}, "logits": {0: "batch_size"}}
-    else:
-        raise ValueError(f"ONNX export not supported for approach '{cfg.approach}'")
+    features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
+    dummy_input = torch.randn(1, cfg.T, cfg.num_keypoints * features_per_kp)
+    input_names = ["keypoints"]
+    dynamic_axes = {"keypoints": {0: "batch_size"}, "logits": {0: "batch_size"}}
 
     torch.onnx.export(
-        model,
+        export_model,
         dummy_input,
         str(output_path),
         opset_version=opset,
@@ -120,15 +122,9 @@ def verify_onnx(
     logger.info("ONNX model structure check passed")
 
     # Create dummy input
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
-        dummy = np.random.randn(1, cfg.T, cfg.num_keypoints * features_per_kp).astype(np.float32)
-        input_name = "keypoints"
-    elif cfg.approach == "video":
-        dummy = np.random.randn(1, 3, cfg.T, cfg.image_size, cfg.image_size).astype(np.float32)
-        input_name = "video"
-    else:
-        raise ValueError(f"Unsupported approach: {cfg.approach}")
+    features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
+    dummy = np.random.randn(1, cfg.T, cfg.num_keypoints * features_per_kp).astype(np.float32)
+    input_name = "keypoints"
 
     # Run ONNX Runtime
     session = ort.InferenceSession(str(onnx_path))
@@ -177,15 +173,9 @@ def benchmark_onnx(
     session = ort.InferenceSession(str(onnx_path), sess_options=sess_opts)
 
     # Create dummy input
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
-        dummy = np.random.randn(1, cfg.T, cfg.num_keypoints * features_per_kp).astype(np.float32)
-        input_name = "keypoints"
-    elif cfg.approach == "video":
-        dummy = np.random.randn(1, 3, cfg.T, cfg.image_size, cfg.image_size).astype(np.float32)
-        input_name = "video"
-    else:
-        raise ValueError(f"Unsupported approach: {cfg.approach}")
+    features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
+    dummy = np.random.randn(1, cfg.T, cfg.num_keypoints * features_per_kp).astype(np.float32)
+    input_name = "keypoints"
 
     # Warm-up
     for _ in range(10):
@@ -242,15 +232,12 @@ if __name__ == "__main__":
     device = torch.device("cpu")
 
     # Build and load model
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        model = build_pose_model(cfg)
-    elif cfg.approach == "video":
-        model = build_video_model(cfg)
-    else:
-        raise ValueError(f"ONNX export not supported for approach '{cfg.approach}'")
+    model = build_model(cfg)
 
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt["model_state_dict"])
+    state_dict = ckpt["model_state_dict"]
+    state_dict.pop("prototypes", None)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
 
     # Export

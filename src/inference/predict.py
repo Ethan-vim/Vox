@@ -17,14 +17,12 @@ import torch
 import torch.nn.functional as F
 
 from src.data.augment import get_val_transforms
-from src.data.dataset import IMAGENET_MEAN, IMAGENET_STD
 from src.data.preprocess import (
     extract_keypoints_mediapipe,
     normalize_keypoints,
     NUM_KEYPOINTS,
 )
-from src.models.pose_transformer import build_pose_model
-from src.models.video_i3d import build_video_model
+from src.models import build_model
 from src.training.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -61,22 +59,25 @@ class SignPredictor:
         self.class_names = class_names
 
         # Build model
-        if cfg.approach in ("pose_transformer", "pose_bilstm"):
-            self.model = build_pose_model(cfg)
-        elif cfg.approach == "video":
-            self.model = build_video_model(cfg)
-        else:
-            raise ValueError(f"Prediction for approach '{cfg.approach}' not yet supported")
+        self.model = build_model(cfg)
 
         # Load checkpoint
         checkpoint_path = Path(checkpoint_path)
         ckpt = torch.load(str(checkpoint_path), map_location=self.device, weights_only=False)
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        state_dict = ckpt["model_state_dict"]
+        state_dict.pop("prototypes", None)
+        self.model.load_state_dict(state_dict, strict=False)
         self.model.to(self.device)
         self.model.eval()
 
+        # Compute prototypes for prototypical models
+        if hasattr(self.model, 'compute_prototypes'):
+            self._load_prototypes(cfg)
+
         # Transforms for keypoint preprocessing
         self.transform = get_val_transforms(T=cfg.T)
+
+        self._use_classify = hasattr(self.model, 'classify')
 
         logger.info(
             "Loaded model from %s (approach=%s, device=%s)",
@@ -84,6 +85,29 @@ class SignPredictor:
             cfg.approach,
             self.device,
         )
+
+    def _load_prototypes(self, cfg: Config) -> None:
+        """Compute prototypes from the training set for prototypical models."""
+        from src.data.dataset import WLASLKeypointDataset, get_dataloader
+
+        data_dir = Path(cfg.data_dir)
+        train_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / "train.csv"
+        if not train_csv.exists():
+            logger.warning("Training CSV not found at %s; skipping prototype computation", train_csv)
+            return
+        train_dataset = WLASLKeypointDataset(
+            split_csv=train_csv,
+            keypoint_dir=data_dir / "processed",
+            transform=self.transform,
+            T=cfg.T,
+            use_motion=getattr(cfg, "use_motion", False),
+        )
+        proto_loader = get_dataloader(
+            train_dataset, batch_size=cfg.batch_size, shuffle=False,
+            num_workers=getattr(cfg, "num_workers", 0),
+        )
+        self.model.compute_prototypes(proto_loader)
+        logger.info("Prototypes computed from training set")
 
     def predict(self, video_path: str | Path) -> dict:
         """Run prediction on a video file.
@@ -107,26 +131,19 @@ class SignPredictor:
         if not video_path.exists():
             raise FileNotFoundError(f"Video not found: {video_path}")
 
-        if self.cfg.approach in ("pose_transformer", "pose_bilstm"):
-            # Extract keypoints on the fly
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as tmp:
-                tmp_path = Path(tmp.name)
+        # Extract keypoints on the fly
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
 
-            keypoints = extract_keypoints_mediapipe(video_path, tmp_path)
-            if keypoints is None:
-                raise RuntimeError(f"Failed to extract keypoints from {video_path}")
+        keypoints = extract_keypoints_mediapipe(video_path, tmp_path)
+        if keypoints is None:
+            raise RuntimeError(f"Failed to extract keypoints from {video_path}")
 
-            keypoints = normalize_keypoints(keypoints)
-            tmp_path.unlink(missing_ok=True)
+        keypoints = normalize_keypoints(keypoints)
+        tmp_path.unlink(missing_ok=True)
 
-            return self._predict_from_keypoints(keypoints)
-
-        elif self.cfg.approach == "video":
-            return self._predict_from_video(video_path)
-
-        else:
-            raise ValueError(f"Unsupported approach: {self.cfg.approach}")
+        return self._predict_from_keypoints(keypoints)
 
     def predict_keypoints(self, npy_path: str | Path) -> dict:
         """Run prediction from a saved ``.npy`` keypoint file.
@@ -169,46 +186,11 @@ class SignPredictor:
         tensor = torch.from_numpy(keypoints).float().unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            logits = self.model(tensor)  # (1, num_classes)
+            if self._use_classify:
+                logits = self.model.classify(tensor)
+            else:
+                logits = self.model(tensor)  # (1, num_classes)
             probs = F.softmax(logits, dim=1).squeeze(0)  # (num_classes,)
-
-        return self._format_result(probs)
-
-    def _predict_from_video(self, video_path: Path) -> dict:
-        """Core prediction logic for raw video input."""
-        import cv2
-
-        cap = cv2.VideoCapture(str(video_path))
-        frames = []
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            # OpenCV reads BGR; convert to RGB for correct ImageNet normalization
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = cv2.resize(frame, (self.cfg.image_size, self.cfg.image_size))
-            frames.append(frame)
-        cap.release()
-
-        if len(frames) == 0:
-            raise RuntimeError(f"No frames read from {video_path}")
-
-        frames_arr = np.stack(frames, axis=0)  # (N, H, W, 3)
-        # Sample T frames uniformly
-        indices = np.linspace(0, len(frames_arr) - 1, self.cfg.T, dtype=np.int64)
-        frames_arr = frames_arr[indices]
-
-        # Normalize
-        tensor = torch.from_numpy(frames_arr).float() / 255.0
-        tensor = tensor.permute(3, 0, 1, 2)  # (3, T, H, W)
-        mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1, 1)
-        std = torch.tensor(IMAGENET_STD).view(3, 1, 1, 1)
-        tensor = (tensor - mean) / std
-        tensor = tensor.unsqueeze(0).to(self.device)  # (1, 3, T, H, W)
-
-        with torch.no_grad():
-            logits = self.model(tensor)
-            probs = F.softmax(logits, dim=1).squeeze(0)
 
         return self._format_result(probs)
 

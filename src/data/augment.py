@@ -8,6 +8,7 @@ recognition, including correct left/right swapping for MediaPipe landmarks.
 from typing import Optional
 
 import numpy as np
+import torch
 
 # ---------------------------------------------------------------------------
 # MediaPipe swap indices for horizontal flip
@@ -519,6 +520,39 @@ def get_train_transforms(T: int = 64) -> Compose:
     )
 
 
+def get_ce_train_transforms(T: int = 64) -> Compose:
+    """Return a milder training augmentation pipeline for cross-entropy training.
+
+    Designed for small datasets (~8 samples/class) where aggressive
+    augmentation destroys signal.  Key differences from ``get_train_transforms``:
+    - No ``TemporalFlip`` (reversing a sign changes its meaning)
+    - Narrower speed perturbation, rotation, noise, and dropout ranges
+
+    Parameters
+    ----------
+    T : int
+        Target sequence length.
+
+    Returns
+    -------
+    Compose
+        A composed pipeline of mild augmentations.
+    """
+    return Compose(
+        [
+            TemporalSpeedPerturb(low=0.85, high=1.15),
+            TemporalCrop(T=T),
+            KeypointHorizontalFlip(p=0.5, centered=True),
+            KeypointYawRotation(max_angle=15, p=0.5),
+            KeypointRotation(max_angle=10, p=0.5),
+            KeypointTranslation(max_shift=0.05, p=0.5),
+            KeypointNoise(sigma=0.01),
+            KeypointScale(low=0.95, high=1.05),
+            KeypointDropout(frame_drop_rate=0.05, landmark_drop_rate=0.03, p=0.3),
+        ]
+    )
+
+
 def get_val_transforms(T: int = 64) -> Compose:
     """Return the default validation/test augmentation pipeline.
 
@@ -539,3 +573,23 @@ def get_val_transforms(T: int = 64) -> Compose:
             TemporalCrop(T=T),
         ]
     )
+
+
+def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 0.2):
+    """Apply mixup augmentation on a batch.
+
+    Returns mixed_x, y_a, y_b, lam.
+    """
+    if alpha > 0:
+        lam = float(np.random.beta(alpha, alpha))
+    else:
+        lam = 1.0
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size, device=x.device)
+    mixed_x = lam * x + (1 - lam) * x[index]
+    return mixed_x, y, y[index], lam
+
+
+def mixup_criterion(criterion, pred: torch.Tensor, y_a: torch.Tensor, y_b: torch.Tensor, lam: float):
+    """Compute mixup loss."""
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)

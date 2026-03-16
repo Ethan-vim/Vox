@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.models.pose_transformer import PoseTransformer
+from src.models import build_model
 from src.training.config import Config
 
 
@@ -19,21 +19,17 @@ class TestPredictFromKeypoints:
         from src.inference.predict import SignPredictor
 
         cfg = Config(
-            approach="pose_transformer",
+            approach="stgcn_ce",
             num_keypoints=NUM_KP,
             num_classes=10,
             wlasl_variant=10,
-            d_model=64,
-            nhead=4,
-            num_layers=1,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
             T=16,
-            dropout=0.0,
             use_motion=use_motion,
         )
-        model = PoseTransformer(
-            num_keypoints=NUM_KP, num_classes=10, d_model=64,
-            nhead=4, num_layers=1, T=16, use_motion=use_motion,
-        )
+        model = build_model(cfg)
         ckpt_path = tmp_path / "model.pt"
         torch.save({"model_state_dict": model.state_dict()}, str(ckpt_path))
 
@@ -89,3 +85,49 @@ class TestPredictFromKeypoints:
         result = predictor.predict_keypoints(npy_path)
         for _, prob in result["top5"]:
             assert 0.0 <= prob <= 1.0
+
+
+class TestPredictCE:
+    """Test SignPredictor with the stgcn_ce approach (no prototypes needed)."""
+
+    def _make_ce_predictor(self, tmp_path):
+        """Create an STGCNClassifier checkpoint and build a SignPredictor."""
+        from src.inference.predict import SignPredictor
+        from src.models.classifier import build_classifier
+
+        cfg = Config(
+            approach="stgcn_ce",
+            num_keypoints=NUM_KP,
+            num_classes=10,
+            wlasl_variant=10,
+            d_model=32,
+            dropout=0.1,
+            head_dropout=0.1,
+            T=16,
+            use_motion=False,
+        )
+        model = build_classifier(cfg)
+        ckpt_path = tmp_path / "ce_model.pt"
+        torch.save({"model_state_dict": model.state_dict()}, str(ckpt_path))
+
+        class_names = [f"sign_{i}" for i in range(10)]
+        predictor = SignPredictor(
+            checkpoint_path=ckpt_path, cfg=cfg, device="cpu",
+            class_names=class_names,
+        )
+        return predictor
+
+    def test_ce_predict_keypoints(self, tmp_path):
+        """STGCNClassifier predictor works without prototypes."""
+        predictor = self._make_ce_predictor(tmp_path)
+        kps = np.random.rand(30, NUM_KP, 3).astype(np.float32)
+        npy_path = tmp_path / "sample_ce.npy"
+        np.save(str(npy_path), kps)
+
+        result = predictor.predict_keypoints(npy_path)
+        assert "gloss" in result
+        assert "confidence" in result
+        assert "top5" in result
+        assert "label_idx" in result
+        assert len(result["top5"]) == 5
+        assert 0.0 <= result["confidence"] <= 1.0

@@ -36,7 +36,7 @@ class Config:
     num_workers: int = 4
 
     # --- Model ---
-    approach: str = "pose_transformer"  # pose_transformer, pose_bilstm, video, fusion
+    approach: str = "stgcn_ce"  # stgcn_ce or stgcn_proto
     backbone: str = "r2plus1d_18"
     num_keypoints: int = 543
     num_classes: int = 100
@@ -52,6 +52,7 @@ class Config:
 
     # --- Features ---
     use_motion: bool = True  # Concatenate velocity (frame differences) with position
+    normalize_embeddings: bool = True  # L2-norm embeddings (True for proto, False for CE)
 
     # --- Training ---
     epochs: int = 100
@@ -59,12 +60,13 @@ class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-3
     warmup_epochs: int = 10
-    label_smoothing: float = 0.05
+    label_smoothing: float = 0.1
     grad_clip: float = 1.0
     fp16: bool = True
     weighted_sampling: bool = False
     early_stopping_patience: int = 15
-    mixup_alpha: float = 0.4  # Mixup interpolation parameter (0 = disabled)
+    mixup_alpha: float = 0.2  # Mixup interpolation parameter (0 = disabled)
+    head_dropout: float = 0.3  # Dropout for classification head (stgcn_ce approach)
 
     # --- Scheduler ---
     scheduler: str = "onecycle"  # onecycle or cosine

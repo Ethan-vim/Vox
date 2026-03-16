@@ -25,13 +25,9 @@ from tqdm import tqdm
 from src.data.augment import get_val_transforms, KeypointHorizontalFlip
 from src.data.dataset import (
     WLASLKeypointDataset,
-    WLASLVideoDataset,
-    WLASLFusionDataset,
     get_dataloader,
 )
-from src.models.pose_transformer import build_pose_model
-from src.models.video_i3d import build_video_model
-from src.models.fusion import build_fusion_model
+from src.models import build_model
 from src.training.config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -91,7 +87,7 @@ def compute_metrics(
     loader: DataLoader,
     device: torch.device,
     class_names: list[str],
-    approach: str = "pose_transformer",
+    approach: str = "stgcn_proto",
     use_tta: bool = False,
     num_keypoints: int = 543,
 ) -> dict:
@@ -108,7 +104,7 @@ def compute_metrics(
     class_names : list[str]
         List of class/gloss names, indexed by label.
     approach : str
-        Model approach (``'fusion'`` requires dual-input unpacking).
+        Model approach (``'stgcn_proto'`` or ``'stgcn_ce'``).
 
     Returns
     -------
@@ -117,26 +113,23 @@ def compute_metrics(
         ``predictions``, ``targets``.
     """
     model.eval()
+    use_classify = hasattr(model, 'classify')
+    _infer = model.classify if use_classify else model
+
     all_preds: list[int] = []
     all_targets: list[int] = []
     all_probs: list[np.ndarray] = []
 
     for batch in tqdm(loader, desc="Evaluating", leave=False):
-        if approach == "fusion":
-            pose_input = batch[0].to(device, non_blocking=True)
-            video_input = batch[1].to(device, non_blocking=True)
-            targets = batch[2].to(device, non_blocking=True)
-            logits = model(pose_input, video_input)
-        else:
-            inputs = batch[0].to(device, non_blocking=True)
-            targets = batch[1].to(device, non_blocking=True)
-            logits = model(inputs)
+        inputs = batch[0].to(device, non_blocking=True)
+        targets = batch[1].to(device, non_blocking=True)
+        logits = _infer(inputs)
 
-            # Test-Time Augmentation: average logits from original + h-flipped
-            if use_tta and approach != "fusion":
-                flipped = _flip_keypoints_tensor(inputs, num_keypoints=num_keypoints)
-                logits_flip = model(flipped)
-                logits = (logits + logits_flip) / 2.0
+        # Test-Time Augmentation: average logits from original + h-flipped
+        if use_tta:
+            flipped = _flip_keypoints_tensor(inputs, num_keypoints=num_keypoints)
+            logits_flip = _infer(flipped)
+            logits = (logits + logits_flip) / 2.0
 
         probs = torch.softmax(logits, dim=1)
 
@@ -385,31 +378,8 @@ def evaluate_latency(
 
 def _build_model(cfg: Config, device: torch.device) -> nn.Module:
     """Build and load a model from checkpoint."""
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        model = build_pose_model(cfg)
-    elif cfg.approach == "video":
-        model = build_video_model(cfg)
-    elif cfg.approach == "fusion":
-        pose_cfg = Config(
-            approach="pose_transformer",
-            num_keypoints=cfg.num_keypoints,
-            num_classes=cfg.num_classes,
-            d_model=cfg.d_model,
-            nhead=cfg.nhead,
-            num_layers=cfg.num_layers,
-            dropout=cfg.dropout,
-            T=cfg.T,
-        )
-        video_cfg = Config(
-            approach="video",
-            backbone=cfg.backbone,
-            num_classes=cfg.num_classes,
-            pretrained=cfg.pretrained,
-            dropout=cfg.dropout,
-        )
-        pose_model = build_pose_model(pose_cfg)
-        video_model = build_video_model(video_cfg)
-        model = build_fusion_model(cfg, pose_model, video_model)
+    if cfg.approach in ("stgcn_proto", "stgcn_ce"):
+        model = build_model(cfg)
     else:
         raise ValueError(f"Unknown approach '{cfg.approach}'")
     return model.to(device)
@@ -440,44 +410,42 @@ def main() -> None:
     # Build and load model
     model = _build_model(cfg, device)
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt["model_state_dict"])
+    state_dict = ckpt["model_state_dict"]
+    state_dict.pop("prototypes", None)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
 
     # Build dataset
     data_dir = Path(cfg.data_dir)
     split_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / f"{args.split}.csv"
 
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        transform = get_val_transforms(T=cfg.T)
-        dataset = WLASLKeypointDataset(
-            split_csv=split_csv,
+    transform = get_val_transforms(T=cfg.T)
+    dataset = WLASLKeypointDataset(
+        split_csv=split_csv,
+        keypoint_dir=data_dir / "processed",
+        transform=transform,
+        T=cfg.T,
+        use_motion=getattr(cfg, "use_motion", False),
+    )
+
+    loader = get_dataloader(dataset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
+
+    # Compute prototypes for prototypical models (stgcn_proto)
+    if hasattr(model, 'compute_prototypes'):
+        train_csv = data_dir / "splits" / f"WLASL{cfg.wlasl_variant}" / "train.csv"
+        train_transform = get_val_transforms(T=cfg.T)
+        train_dataset = WLASLKeypointDataset(
+            split_csv=train_csv,
             keypoint_dir=data_dir / "processed",
-            transform=transform,
+            transform=train_transform,
             T=cfg.T,
             use_motion=getattr(cfg, "use_motion", False),
         )
-    elif cfg.approach == "video":
-        dataset = WLASLVideoDataset(
-            split_csv=split_csv,
-            video_dir=data_dir / "raw",
-            T=cfg.T,
-            size=cfg.image_size,
+        proto_loader = get_dataloader(
+            train_dataset, batch_size=cfg.batch_size, shuffle=False,
+            num_workers=cfg.num_workers,
         )
-    elif cfg.approach == "fusion":
-        transform = get_val_transforms(T=cfg.T)
-        dataset = WLASLFusionDataset(
-            split_csv=split_csv,
-            keypoint_dir=data_dir / "processed",
-            video_dir=data_dir / "raw",
-            kp_transform=transform,
-            T_kp=cfg.T,
-            T_vid=cfg.T // 2,
-            size=cfg.image_size,
-        )
-    else:
-        raise ValueError(f"Unknown approach '{cfg.approach}'")
-
-    loader = get_dataloader(dataset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
+        model.compute_prototypes(proto_loader)
 
     # Build class names from all available split CSVs for complete coverage
     import pandas as pd
@@ -517,28 +485,16 @@ def main() -> None:
     for true_cls, pred_cls, count in pairs:
         logger.info("  %s -> %s (%d times)", true_cls, pred_cls, count)
 
-    # Latency benchmark (skipped for fusion — requires dual inputs)
-    if cfg.approach in ("pose_transformer", "pose_bilstm"):
-        features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
-        input_shape = (cfg.T, cfg.num_keypoints * features_per_kp)
-        latency = evaluate_latency(model, device, input_shape)
-        logger.info(
-            "Latency: %.1f ms (std=%.1f, min=%.1f, max=%.1f) | FPS: %.1f",
-            latency["mean_ms"], latency["std_ms"],
-            latency["min_ms"], latency["max_ms"],
-            latency["fps"],
-        )
-    elif cfg.approach == "video":
-        input_shape = (3, cfg.T, cfg.image_size, cfg.image_size)
-        latency = evaluate_latency(model, device, input_shape)
-        logger.info(
-            "Latency: %.1f ms (std=%.1f, min=%.1f, max=%.1f) | FPS: %.1f",
-            latency["mean_ms"], latency["std_ms"],
-            latency["min_ms"], latency["max_ms"],
-            latency["fps"],
-        )
-    else:
-        logger.info("Latency benchmark skipped for fusion models (requires dual inputs)")
+    # Latency benchmark
+    features_per_kp = 6 if getattr(cfg, "use_motion", False) else 3
+    input_shape = (cfg.T, cfg.num_keypoints * features_per_kp)
+    latency = evaluate_latency(model, device, input_shape)
+    logger.info(
+        "Latency: %.1f ms (std=%.1f, min=%.1f, max=%.1f) | FPS: %.1f",
+        latency["mean_ms"], latency["std_ms"],
+        latency["min_ms"], latency["max_ms"],
+        latency["fps"],
+    )
 
 
 if __name__ == "__main__":

@@ -72,20 +72,19 @@ Shows which project files each module imports from (`src.*` imports only).
                ┌──────────────────────────┘  │  │        │  │
                v                             v  │        v  │
     ┌────────────────┐            ┌─────────────────┐      │
-    │ preprocess.py  │            │pose_transformer.│      │
-    │ (normalize,    │            │   py            │      │
-    │  keypoints)    │            │ (PoseTransformer│      │
-    └────────────────┘            │  PoseBiLSTM)    │      │
-                                  └─────────────────┘      │
-                                                           │
-               ┌───────────────────────────────────────────┘
-               v
-    ┌─────────────────┐    ┌─────────────────┐
-    │  video_i3d.py   │    │   fusion.py     │
-    │ (VideoClassifier│    │ (FusionModel,   │
-    │  build_video_   │    │  CrossAttention │
-    │  model)         │    │  Fusion)        │
-    └─────────────────┘    └─────────────────┘
+    │ preprocess.py  │            │  stgcn.py       │      │
+    │ (normalize,    │            │ (STGCNEncoder,  │      │
+    │  keypoints)    │            │  body/hand      │      │
+    └────────────────┘            │  graph branches)│      │
+                                  └────────┬────────┘      │
+                                  ┌────────┼───────────────┘
+                                  v        v
+                        ┌──────────────┐ ┌──────────────┐
+                        │classifier.py │ │prototypical. │
+                        │(STGCNClassi- │ │  py          │
+                        │ fier + head) │ │(PrototypicalN│
+                        └──────────────┘ │ etwork)      │
+                                         └──────────────┘
 ```
 
 ---
@@ -108,34 +107,37 @@ Shows which project files each module imports from (`src.*` imports only).
 | Module | Key Functions / Classes | Used By |
 |--------|------------------------|---------|
 | `preprocess.py` | `download_wlasl_annotations()`, `parse_wlasl_annotations()`, `extract_keypoints_mediapipe()`, `normalize_keypoints()`, `preprocess_dataset()`, `create_splits()` | `download_wlasl.py`, `download_kaggle.py`, `predict.py`, `live_demo.py` |
-| `augment.py` | `TemporalCrop`, `TemporalSpeedPerturb`, `KeypointHorizontalFlip`, `KeypointYawRotation`, `KeypointRotation`, `KeypointTranslation`, `KeypointDropout`, `KeypointNoise`, `KeypointScale`, `Compose`, `get_train_transforms()`, `get_val_transforms()` | `train.py`, `evaluate.py`, `predict.py` |
-| `dataset.py` | `WLASLKeypointDataset`, `WLASLVideoDataset`, `WLASLFusionDataset`, `get_dataloader()` | `train.py`, `evaluate.py` |
+| `augment.py` | `TemporalCrop`, `TemporalSpeedPerturb`, `KeypointHorizontalFlip`, `KeypointYawRotation`, `KeypointRotation`, `KeypointTranslation`, `KeypointDropout`, `KeypointNoise`, `KeypointScale`, `Compose`, `get_train_transforms()`, `get_ce_train_transforms()`, `get_val_transforms()` | `train_ce.py`, `train_prototypical.py`, `evaluate.py`, `predict.py` |
+| `dataset.py` | `WLASLKeypointDataset`, `get_dataloader()` | `train_ce.py`, `train_prototypical.py`, `evaluate.py` |
 
 ### Models (`src/models/`)
 
 | Module | Key Classes | Build Function | Approaches |
 |--------|-------------|----------------|------------|
-| `pose_transformer.py` | `PoseTransformer`, `PoseBiLSTM` | `build_pose_model(cfg)` | A (pose_transformer, pose_bilstm) |
-| `video_i3d.py` | `VideoClassifier` | `build_video_model(cfg)` | B (video) |
-| `fusion.py` | `FusionModel`, `CrossAttentionFusion` | `build_fusion_model(cfg)` | C (fusion) |
+| `__init__.py` | — | `build_model(cfg)` | Unified factory dispatching on `cfg.approach` |
+| `stgcn.py` | `STGCNEncoder` | `build_stgcn_encoder(cfg)` | ST-GCN encoder with body/hand graph branches, conditional L2 normalization |
+| `classifier.py` | `STGCNClassifier` | `build_classifier(cfg)` | ST-GCN encoder + two-layer head (stgcn_ce) |
+| `prototypical.py` | `PrototypicalNetwork` | — | Prototypical network wrapper for few-shot (stgcn_proto) |
 
-All `build_*_model()` functions take a `Config` object and return an `nn.Module`.
+The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.approach` to the correct model builder. All `build_*_model()` functions take a `Config` object and return an `nn.Module`.
 
 ### Training (`src/training/`)
 
 | Module | Key Functions | Imports From |
 |--------|---------------|--------------|
 | `config.py` | `Config` (dataclass), `load_config()`, `save_config()` | (none — leaf dependency) |
-| `train.py` | `train_one_epoch()`, `validate()`, `main()` | `config`, `augment`, `dataset`, `pose_transformer`, `video_i3d`, `fusion` |
-| `evaluate.py` | `compute_metrics()`, `plot_confusion_matrix()`, `find_hard_negatives()`, `evaluate_latency()`, `main()` | `config`, `augment`, `dataset`, `pose_transformer`, `video_i3d`, `fusion` |
+| `train.py` | `main()` — CLI dispatcher | `config`, `train_ce`, `train_prototypical` |
+| `train_ce.py` | `train_ce()` — standard cross-entropy training loop with label smoothing + mixup | `config`, `augment`, `dataset`, `models` |
+| `train_prototypical.py` | `train_prototypical()` — episodic prototypical training loop | `config`, `augment`, `dataset`, `episode_sampler`, `models` |
+| `evaluate.py` | `compute_metrics()`, `plot_confusion_matrix()`, `find_hard_negatives()`, `evaluate_latency()`, `main()` | `config`, `augment`, `dataset`, `models` |
 
 ### Inference (`src/inference/`)
 
 | Module | Key Classes / Functions | Imports From |
 |--------|------------------------|--------------|
-| `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `pose_transformer`, `video_i3d` |
-| `live_demo.py` | `FrameBuffer`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `pose_transformer` |
-| `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `pose_transformer`, `video_i3d` |
+| `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `models` |
+| `live_demo.py` | `FrameBuffer`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `models` |
+| `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `models` |
 
 ---
 
@@ -217,35 +219,43 @@ ONNX Export (export_onnx.py):
                               benchmark (optional) ──> avg latency over 100 runs
 ```
 
-### Model Architecture Flow (Approach A)
+### Model Architecture Flow (ST-GCN)
 
 ```
-Input: (batch, T, input_dim)     input_dim = 543*6 = 3258 (with motion)
+Input: (batch, T, input_dim)     input_dim = 543*3 or 543*6 (with motion)
               │
               v
     ┌──────────────────────────┐
-    │  Multi-stage projection  │  input_dim -> intermediate_dim -> d_model
-    │  (GELU activation)       │  intermediate_dim = min(input_dim//2, d_model*4)
+    │  Reshape to graph        │  (B, C, T, V) where V=num_keypoints
     └─────────┬────────────────┘
-              v
+              │
+    ┌─────────┼─────────┐
+    v         v         v
+  ┌──────┐ ┌──────┐ ┌──────┐
+  │ Body │ │ Left │ │Right │     Separate graph convolution branches
+  │ GCN  │ │ Hand │ │ Hand │     with adjacency matrices
+  │(33kp)│ │(21kp)│ │(21kp)│
+  └──┬───┘ └──┬───┘ └──┬───┘
+     └─────────┼─────────┘
+               v
     ┌─────────────────────┐
-    │  Positional Encoding│  (learned, T positions)
+    │  Concat + Project   │  Fuse branch outputs
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
-    │  TransformerEncoder │  variant-scaled: 100→(2,4,128), 300→(4,6,192),
-    │  xN encoder layers  │  1000→(5,8,256), 2000→(6,8,384)
+    │  Global Avg Pool    │  (T, d_model) -> (d_model,)
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
-    │  Mean pooling        │  (T, d_model) -> (d_model,)
+    │  L2 Normalize?      │  Only when normalize_embeddings=True (proto)
     └─────────┬───────────┘
               v
-    ┌─────────────────────┐
-    │  Classification head│  Linear(d_model -> num_classes)
-    └─────────┬───────────┘
+    ┌─────────────────────────────┐
+    │  Classification head (CE)   │  Linear→BN→ReLU→Dropout→Linear
+    │  OR Prototypical distance   │  Distance to class prototypes
+    └─────────┬───────────────────┘
               v
-    Output: (batch, num_classes) logits
+    Output: (batch, num_classes) logits or distances
 ```
 
 ---
@@ -253,9 +263,8 @@ Input: (batch, T, input_dim)     input_dim = 543*6 = 3258 (with motion)
 ## Configuration Flow
 
 ```
-configs/pose_transformer.yaml
-configs/video_classifier.yaml        ──> load_config() ──> Config dataclass
-configs/fusion.yaml                                             │
+configs/stgcn_ce.yaml (default)       ──> load_config() ──> Config dataclass
+configs/stgcn_proto.yaml                                        │
                                                     ┌───────────┼───────────┐
                                                     v           v           v
                                               train.py    evaluate.py  predict.py
@@ -267,7 +276,7 @@ Config.__post_init__() auto-derives (dropout scales with model size, skipped for
     wlasl_variant: 300  ──>  num_classes: 300,  d_model: 192, nhead: 6, num_layers: 4, dropout: 0.3
     wlasl_variant: 1000 ──>  num_classes: 1000, d_model: 256, nhead: 8, num_layers: 5, dropout: 0.4
     wlasl_variant: 2000 ──>  num_classes: 2000, d_model: 384, nhead: 8, num_layers: 6, dropout: 0.5
-    Note: dropout override is skipped when approach="video" (3D CNNs use their own dropout).
+    Note: d_model, nhead, num_layers, dropout are auto-scaled per variant.
 ```
 
 ---
@@ -284,7 +293,7 @@ Each test file maps to one or more source modules:
 | `test_evaluate.py` | `src/training/evaluate.py` — metrics, TTA, hard negatives, latency |
 | `test_export_onnx.py` | `src/inference/export_onnx.py` — ONNX export and verification |
 | `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, prediction smoothing |
-| `test_models.py` | `src/models/` — PoseTransformer, PoseBiLSTM, FusionModel shapes |
+| `test_models.py` | `src/models/` — STGCNEncoder, STGCNClassifier, PrototypicalNetwork, normalize_embeddings |
 | `test_predict.py` | `src/inference/predict.py` — SignPredictor inference paths |
 | `test_preprocess.py` | `src/data/preprocess.py` — normalization, annotation parsing, splits |
 | `test_train.py` | `src/training/train.py` — accuracy, mixup helpers |

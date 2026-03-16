@@ -1,0 +1,54 @@
+## ST-GCN + Prototypical Network (few-shot)
+## Episodic metric learning for low-sample scenarios.
+## Optimized configuration (WLASL100).
+
+approach: stgcn_proto
+wlasl_variant: 100
+num_keypoints: 543
+T: 64
+use_motion: true
+
+# Model (ST-GCN encoder)
+d_model: 128
+gcn_channels: [64, 128, 128]
+num_layers: 3
+dropout: 0.1
+normalize_embeddings: true
+
+# Prototypical training
+n_way: 10
+k_shot: 3
+q_query: 2
+num_episodes: 200
+
+# Training
+epochs: 200
+batch_size: 16
+lr: 1.0e-3
+weight_decay: 1.0e-4
+warmup_epochs: 10
+grad_clip: 1.0
+fp16: false
+early_stopping_patience: 30
+scheduler: cosine
+num_workers: 4
+
+# Evaluation
+use_tta: false
+
+# Logging
+use_wandb: false
+use_tensorboard: true
+log_interval: 10
+
+# Inference
+confidence_threshold: 0.6
+smoothing_window: 5
+buffer_size: 64
+fps_display: true
+
+# Paths
+data_dir: data
+output_dir: outputs
+checkpoint_dir: checkpoints
+log_dir: logs
