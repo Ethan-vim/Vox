@@ -70,12 +70,14 @@ Feed        Buffer  |  Keypoints    (body/hand      |    Gloss +
                     +-------------------------------+
 ```
 
-**Two training approaches are available:**
+**Two training approaches are available — `stgcn_ce` is the recommended default:**
 
 | Approach | Config | Model | Description | WLASL-100 Top-1 |
 | -------- | ------ | ----- | ----------- | --------------- |
-| `stgcn_ce` (default) | `configs/stgcn_ce.yaml` | ST-GCN + linear head | Standard cross-entropy classification. Best for closed-set classification with known classes. | 45–55% |
+| **`stgcn_ce` (recommended)** | `configs/stgcn_ce.yaml` | ST-GCN + two-layer head | Standard cross-entropy classification. **Best overall model** for closed-set classification with known classes. | 45–55% |
 | `stgcn_proto` | `configs/stgcn_proto.yaml` | ST-GCN + prototypical net | Episodic metric learning. Best for few-shot scenarios or adding new signs without retraining. | ~100% (few-shot) |
+
+> **Start here:** Use `stgcn_ce` unless you specifically need few-shot classification. It is our best-performing model for standard training.
 
 Both approaches share the same ST-GCN encoder (`src/models/stgcn.py`) with body/hand graph branches. The key difference is that `stgcn_ce` disables L2 embedding normalization (for unconstrained logits) while `stgcn_proto` enables it (for distance-based classification).
 
@@ -260,13 +262,13 @@ The validator checks the first 256 bytes of each file for HTML signatures (`<!DO
 
 #### End-to-end quick start with Kaggle
 
-If you want the fastest path from zero to training, run these commands in order (all `python` commands are cross-platform):
+If you want the fastest path from zero to training, run these commands in order. This uses **`stgcn_ce` (recommended default — our best model)**:
 
 ```bash
 # 1. Setup
 pip install -r requirements.txt
 
-# 2. Auto-detect hardware and generate optimized config
+# 2. Auto-detect hardware and generate optimized stgcn_ce config (recommended)
 python scripts/auto_config.py --approach stgcn_ce
 
 # 3. Configure Kaggle API (one-time — see "One-time Kaggle API setup" above)
@@ -320,28 +322,25 @@ Larger variants need more model capacity. See the [Recommended Configurations](#
 
 #### Device-specific configuration after Kaggle download
 
-After downloading the Kaggle dataset, adjust `configs/stgcn_ce.yaml` for your hardware before training (step 6). Set `wlasl_variant` to match the subset you preprocessed in step 5.
+After downloading the Kaggle dataset, adjust `configs/stgcn_ce.yaml` (recommended default) for your hardware before training (step 6). Set `wlasl_variant` to match the subset you preprocessed in step 5.
 
 **CPU-only (no GPU):**
 
 ```yaml
 approach: stgcn_ce
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
+normalize_embeddings: false  # required for CE
 fp16: false                  # FP16 only works on CUDA
-batch_size: 8                # smaller batches to avoid memory pressure
+batch_size: 8                # smaller batches for CPU
 num_workers: 2
 T: 64
-d_model: 128
-nhead: 4
-num_layers: 2
-dropout: 0.1
-lr: 3.0e-4
-weight_decay: 5.0e-4
-label_smoothing: 0.0
-mixup_alpha: 0.15
+lr: 1.0e-3
+weight_decay: 1.0e-4
 scheduler: cosine
+warmup_epochs: 10
 weighted_sampling: true
-epochs: 250
+early_stopping_patience: 30
+epochs: 200
 ```
 
 Use `--device cpu` for inference and live demo. Stick to keypoint approaches (`stgcn_ce` or `stgcn_proto`) — they are lightweight and run well on CPU.
@@ -351,21 +350,18 @@ Use `--device cpu` for inference and live demo. Stick to keypoint approaches (`s
 ```yaml
 approach: stgcn_ce
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
+normalize_embeddings: false  # required for CE
 fp16: true                   # faster training, lower memory
-batch_size: 64               # increase to 64 for large GPUs
-num_workers: 8
+batch_size: 32               # increase to 64 for large GPUs
+num_workers: 4
 T: 64
-d_model: 128
-nhead: 4
-num_layers: 2
-dropout: 0.1
-lr: 3.0e-4
-weight_decay: 5.0e-4
-label_smoothing: 0.0
-mixup_alpha: 0.15
+lr: 1.0e-3
+weight_decay: 1.0e-4
 scheduler: cosine
+warmup_epochs: 10
 weighted_sampling: true
-epochs: 250
+early_stopping_patience: 30
+epochs: 200
 ```
 
 Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_size` first, then `T`.
@@ -375,21 +371,18 @@ Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_si
 ```yaml
 approach: stgcn_ce
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
+normalize_embeddings: false  # required for CE
 fp16: false                  # MPS does not support FP16 reliably
 batch_size: 16
-num_workers: 2
+num_workers: 0               # MPS requires 0 workers
 T: 64
-d_model: 128
-nhead: 4
-num_layers: 2
-dropout: 0.1
-lr: 3.0e-4
-weight_decay: 5.0e-4
-label_smoothing: 0.0
-mixup_alpha: 0.15
+lr: 1.0e-3
+weight_decay: 1.0e-4
 scheduler: cosine
+warmup_epochs: 10
 weighted_sampling: true
-epochs: 250
+early_stopping_patience: 30
+epochs: 200
 ```
 
 Use `--device cpu` for the live demo to avoid MPS overhead. Install MediaPipe with `pip install mediapipe-silicon` if the standard package fails.
@@ -485,12 +478,11 @@ data/
 Set `wlasl_variant` in your config to match the subset you preprocessed. All scripts automatically resolve split files from `data/splits/WLASL{N}/`.
 
 ```bash
-# ST-GCN + Cross-Entropy (default, recommended starting point)
+# ST-GCN + Cross-Entropy (recommended — best model for standard training)
 python -m src.training.train --config configs/stgcn_ce.yaml
 
-# ST-GCN + Prototypical Network (few-shot training)
+# ST-GCN + Prototypical Network (alternative — for few-shot scenarios only)
 python -m src.training.train --config configs/stgcn_proto.yaml
-
 ```
 
 Training checkpoints are saved to `checkpoints/` and logs to `logs/`.
@@ -787,10 +779,10 @@ python scripts/reset_configs.py --dry-run            # preview without writing
 Detect your GPU/CPU and generate an optimized config automatically. The script probes CUDA VRAM, Apple Silicon MPS, or CPU, classifies your hardware into a performance tier, and writes a ready-to-train config:
 
 ```bash
-# Cross-entropy approach (recommended starting point)
+# Cross-entropy approach (recommended — best model)
 python scripts/auto_config.py --approach stgcn_ce
 
-# Prototypical approach (few-shot)
+# Prototypical approach (alternative — few-shot scenarios only)
 python scripts/auto_config.py --approach stgcn_proto --variant 100
 
 # Preview without writing
@@ -977,12 +969,12 @@ Episodic N-way K-shot metric learning. Uses `normalize_embeddings: true` to proj
 
 ## Switching Between Approaches
 
-The `approach` field in your YAML config controls which model architecture and training loop are used. To switch between cross-entropy and prototypical training:
+The `approach` field in your YAML config controls which model architecture and training loop are used. **`stgcn_ce` is recommended for most users.**
 
-1. **Change the config file:** Use `configs/stgcn_ce.yaml` for cross-entropy or `configs/stgcn_proto.yaml` for prototypical training.
+1. **Change the config file:** Use `configs/stgcn_ce.yaml` (recommended) for cross-entropy or `configs/stgcn_proto.yaml` for prototypical training.
 2. **Or edit the `approach` field** in your existing config:
-   - `approach: stgcn_ce` — Uses `STGCNClassifier` (ST-GCN encoder + two-layer head) trained with standard cross-entropy loss. Uses `normalize_embeddings: false` and milder augmentation. Best when all target classes are known at training time.
-   - `approach: stgcn_proto` — Uses `PrototypicalNetwork` (ST-GCN encoder + episodic metric learning) trained with N-way K-shot episodes. Uses `normalize_embeddings: true` and stronger augmentation. Best for few-shot classification or when you need to add new sign classes without retraining.
+   - `approach: stgcn_ce` **(recommended)** — Uses `STGCNClassifier` (ST-GCN encoder + two-layer head) trained with standard cross-entropy loss. Uses `normalize_embeddings: false` and milder augmentation. Best overall model when all target classes are known at training time.
+   - `approach: stgcn_proto` — Uses `PrototypicalNetwork` (ST-GCN encoder + episodic metric learning) trained with N-way K-shot episodes. Uses `normalize_embeddings: true` and stronger augmentation. Use only for few-shot classification or when you need to add new sign classes without retraining.
 
 Both approaches share the same ST-GCN encoder (`src/models/stgcn.py`) and data pipeline. The unified `build_model()` factory in `src/models/__init__.py` dispatches to the correct model based on `cfg.approach`.
 
@@ -1097,7 +1089,7 @@ These are tuned starting points for each dataset variant. Copy the base config a
 
 ### WLASL100 (recommended starting point)
 
-~2,000 annotations, ~100 glosses. Expect 400–1,200 usable training samples depending on download availability. Uses `stgcn_ce` (ST-GCN with cross-entropy) by default. Architecture is auto-scaled by `Config.__post_init__`.
+~2,000 annotations, ~100 glosses. Expect 400–1,200 usable training samples depending on download availability. Uses **`stgcn_ce` (recommended — our best model)** by default. Architecture is auto-scaled by `Config.__post_init__`.
 
 ```yaml
 approach: stgcn_ce
@@ -1238,7 +1230,7 @@ WLASL's expired URLs mean you may only get 30–60% of the annotated videos. Whe
 
 ### Improving Accuracy
 
-- **Start with `stgcn_ce`** — it trains fastest and is easiest to debug.
+- **Start with `stgcn_ce` (recommended)** — our best model. It trains fastest and is easiest to debug.
 - **Enable motion features** (`use_motion: true`) — velocity information captures signing dynamics and typically adds 5–8% accuracy.
 - **Disable label smoothing and mixup** for small datasets — they are counterproductive with ~8 samples/class.
 - **Set `normalize_embeddings: false` for CE** — L2 normalization caps logit magnitudes and causes loss plateaus.

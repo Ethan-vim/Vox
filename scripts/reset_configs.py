@@ -25,7 +25,7 @@ CONFIGS_DIR = PROJECT_ROOT / "configs"
 # ---------------------------------------------------------------------------
 
 STGCN_CE_YAML = """\
-## ST-GCN + Cross-Entropy (recommended default)
+## ST-GCN + Cross-Entropy (recommended default — best model)
 ## Optimized configuration (WLASL100).
 
 approach: stgcn_ce
@@ -61,9 +61,22 @@ early_stopping_patience: 30
 scheduler: cosine
 num_workers: 4
 
+# Logging
+use_wandb: false
+use_tensorboard: true
+log_interval: 10
+
+# Inference
+confidence_threshold: 0.6
+smoothing_window: 5
+buffer_size: 64
+fps_display: true
+
 # Paths
 data_dir: data
+output_dir: outputs
 checkpoint_dir: checkpoints
+log_dir: logs
 """
 
 STGCN_PROTO_YAML = """\
