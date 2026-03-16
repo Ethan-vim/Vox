@@ -27,9 +27,9 @@ A real-time ASL word-level recognition system that captures live webcam video, p
 - **[Configuration Guide](#configuration-guide)** — Line 745
   - [Auto-Configure for Your Hardware](#auto-configure-for-your-hardware) — Line 759
 - **[Approach Details](#approach-details)** — Line 881
-  - [Approach A: Pose/Keypoint Transformer](#approach-a-posekeypoint-transformer) — Line 883
-  - [Approach B: RGB Video Classifier](#approach-b-rgb-video-classifier) — Line 903
-  - [Approach C: Hybrid Fusion](#approach-c-hybrid-fusion) — Line 911
+  - [ST-GCN Encoder (Shared)](#stgcn-encoder-shared)
+  - [Cross-Entropy (stgcn_ce)](#cross-entropy-stgcn_ce)
+  - [Prototypical (stgcn_proto)](#prototypical-stgcn_proto)
 - **[Troubleshooting](#troubleshooting)** — Line 919
   - [HTML files masquerading as videos](#html-files-masquerading-as-videos) — Line 921
   - [MediaPipe installation issues](#mediapipe-installation-issues) — Line 924
@@ -43,8 +43,6 @@ A real-time ASL word-level recognition system that captures live webcam video, p
   - [WLASL300](#wlasl300) — Line 1043
   - [WLASL1000](#wlasl1000) — Line 1090
   - [WLASL2000](#wlasl2000) — Line 1113
-  - [Video Classifier (Approach B)](#video-classifier-approach-b) — Line 1089
-  - [Fusion (Approach C)](#fusion-approach-c) — Line 1105
 - **[Tips & Best Practices](#tips--best-practices)** — Line 1124
   - [Hardware-Specific Setup](#hardware-specific-setup) — Line 1126
   - [Training with Limited Data](#training-with-limited-data) — Line 1149
@@ -63,40 +61,23 @@ A real-time ASL word-level recognition system that captures live webcam video, p
 ## Architecture
 
 ```
-                        APPROACH A (Pose/Keypoint)
+                    ST-GCN Keypoint Pipeline
                     +-------------------------------+
-                    |  MediaPipe     Transformer/   |
-Webcam  --> Frame --+  Holistic  --> LSTM Encoder --+--> Predicted
-Feed        Buffer  |  Keypoints    (T, 543*6)     |    Gloss +
-(OpenCV)    (T=64)  |  + Velocity                  |    Confidence
-                    +-------------------------------+
-                    |                               |
-                    |  APPROACH B (RGB Video)        |
-                    |  R(2+1)D / SlowFast / R3D    |
-                    |  (B, 3, T, 224, 224)         |
-                    +-------------------------------+
-                    |                               |
-                    |  APPROACH C (Hybrid Fusion)    |
-                    |  Concat / Cross-Attention     |
-                    |  of Pose + Video features     |
+                    |  MediaPipe     ST-GCN         |
+Webcam  --> Frame --+  Holistic  --> Encoder   -----+--> Predicted
+Feed        Buffer  |  Keypoints    (body/hand      |    Gloss +
+(OpenCV)    (T=64)  |  + Velocity    graph branches)|    Confidence
                     +-------------------------------+
 ```
 
-**Three approaches are implemented:**
+**Two training approaches are available:**
 
+| Approach | Config | Model | Description | WLASL-100 Top-1 |
+| -------- | ------ | ----- | ----------- | --------------- |
+| `stgcn_ce` (default) | `configs/stgcn_ce.yaml` | ST-GCN + linear head | Standard cross-entropy classification. Best for closed-set classification with known classes. | 45–55% |
+| `stgcn_proto` | `configs/stgcn_proto.yaml` | ST-GCN + prototypical net | Episodic metric learning. Best for few-shot scenarios or adding new signs without retraining. | ~100% (few-shot) |
 
-| Approach             | Model                                  | Input                                         | WLASL-100 Top-1 (expected) |
-| -------------------- | -------------------------------------- | --------------------------------------------- | -------------------------- |
-| A - Pose Transformer | Transformer Encoder / BiLSTM           | MediaPipe keypoints (T, 543, 6) with velocity | 60–70%                     |
-| B - Video Classifier | R(2+1)D-18, R3D-18, SlowFast           | RGB frames (3, T, 224, 224)                   | 65–75%                     |
-| C - Hybrid Fusion    | Concat / Cross-Attention fusion of A+B | Both streams                                  | 70–78%                     |
-
-**Two training approaches are available for keypoint-based models:**
-
-| Approach | Config | Description |
-| -------- | ------ | ----------- |
-| `stgcn_ce` (default) | `configs/stgcn_ce.yaml` | Standard cross-entropy classification with label smoothing and mixup. Best for closed-set classification with known classes. |
-| `stgcn_proto` | `configs/stgcn_proto.yaml` | Episodic prototypical training. Best for few-shot scenarios or when you need to classify new signs without retraining. |
+Both approaches share the same ST-GCN encoder (`src/models/stgcn.py`) with body/hand graph branches. The key difference is that `stgcn_ce` disables L2 embedding normalization (for unconstrained logits) while `stgcn_proto` enables it (for distance-based classification).
 
 To switch between approaches, change the `approach` field in your YAML config file (see [Switching Between Approaches](#switching-between-approaches)).
 
@@ -117,7 +98,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
-python scripts/auto_config.py --approach pose
+python scripts/auto_config.py --approach stgcn_ce
 ```
 
 **Windows (PowerShell):**
@@ -130,7 +111,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-python scripts/auto_config.py --approach pose
+python scripts/auto_config.py --approach stgcn_ce
 ```
 
 **Windows (Command Prompt):**
@@ -143,7 +124,7 @@ python -m venv .venv
 .venv\Scripts\activate.bat
 
 pip install -r requirements.txt
-python scripts/auto_config.py --approach pose
+python scripts/auto_config.py --approach stgcn_ce
 ```
 
 #### Installing PyTorch with CUDA support
@@ -286,7 +267,7 @@ If you want the fastest path from zero to training, run these commands in order 
 pip install -r requirements.txt
 
 # 2. Auto-detect hardware and generate optimized config
-python scripts/auto_config.py --approach pose
+python scripts/auto_config.py --approach stgcn_ce
 
 # 3. Configure Kaggle API (one-time — see "One-time Kaggle API setup" above)
 
@@ -302,12 +283,12 @@ python scripts/validate_videos.py --video-dir data/raw --delete
 python -m src.data.preprocess --data-dir data --subset WLASL100 --mode keypoints
 
 # 7. Train (see device-specific configs below)
-python -m src.training.train --config configs/pose_transformer.yaml
+python -m src.training.train --config configs/stgcn_ce.yaml
 
 # 8. Evaluate
 #    Linux/macOS uses \ for line continuation; Windows PowerShell uses `
 python -m src.training.evaluate \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt \
     --split val --output-dir eval_results
 
@@ -315,7 +296,7 @@ On Windows PowerShell, the evaluate command (step 8) becomes:
 
 ```powershell
 python -m src.training.evaluate `
-    --config configs/pose_transformer.yaml `
+    --config configs/stgcn_ce.yaml `
     --checkpoint checkpoints/best_model.pt `
     --split val --output-dir eval_results
 ```
@@ -339,12 +320,12 @@ Larger variants need more model capacity. See the [Recommended Configurations](#
 
 #### Device-specific configuration after Kaggle download
 
-After downloading the Kaggle dataset, adjust `configs/pose_transformer.yaml` for your hardware before training (step 6). Set `wlasl_variant` to match the subset you preprocessed in step 5.
+After downloading the Kaggle dataset, adjust `configs/stgcn_ce.yaml` for your hardware before training (step 6). Set `wlasl_variant` to match the subset you preprocessed in step 5.
 
 **CPU-only (no GPU):**
 
 ```yaml
-approach: pose_transformer
+approach: stgcn_ce
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
 fp16: false                  # FP16 only works on CUDA
 batch_size: 8                # smaller batches to avoid memory pressure
@@ -363,12 +344,12 @@ weighted_sampling: true
 epochs: 250
 ```
 
-Use `--device cpu` for inference and live demo. Stick to Approach A (pose_transformer) — video models are too slow on CPU for training.
+Use `--device cpu` for inference and live demo. Stick to keypoint approaches (`stgcn_ce` or `stgcn_proto`) — they are lightweight and run well on CPU.
 
 **GPU / CUDA:**
 
 ```yaml
-approach: pose_transformer
+approach: stgcn_ce
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
 fp16: true                   # faster training, lower memory
 batch_size: 64               # increase to 64 for large GPUs
@@ -392,7 +373,7 @@ Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_si
 **Apple Silicon (M1/M2/M3/M4):**
 
 ```yaml
-approach: pose_transformer
+approach: stgcn_ce
 wlasl_variant: 100          # match your preprocessed subset (100, 300, 1000, or 2000)
 fp16: false                  # MPS does not support FP16 reliably
 batch_size: 16
@@ -510,11 +491,6 @@ python -m src.training.train --config configs/stgcn_ce.yaml
 # ST-GCN + Prototypical Network (few-shot training)
 python -m src.training.train --config configs/stgcn_proto.yaml
 
-# Approach B: Video Classifier
-python -m src.training.train --config configs/video_classifier.yaml
-
-# Approach C: Hybrid Fusion
-python -m src.training.train --config configs/fusion.yaml
 ```
 
 Training checkpoints are saved to `checkpoints/` and logs to `logs/`.
@@ -528,11 +504,11 @@ To train on a different variant, either edit `wlasl_variant` in an existing conf
 
 ```bash
 # Copy and modify — only change wlasl_variant (num_classes is auto-derived)
-cp configs/pose_transformer.yaml configs/pose_wlasl300.yaml          # Linux/macOS
-# copy configs\pose_transformer.yaml configs\pose_wlasl300.yaml      # Windows
+cp configs/stgcn_ce.yaml configs/stgcn_ce_wlasl300.yaml          # Linux/macOS
+# copy configs\stgcn_ce.yaml configs\stgcn_ce_wlasl300.yaml    # Windows
 
 # Edit wlasl_variant: 300 in the new file
-python -m src.training.train --config configs/pose_wlasl300.yaml
+python -m src.training.train --config configs/stgcn_ce_wlasl300.yaml
 ```
 
 ---
@@ -543,7 +519,7 @@ python -m src.training.train --config configs/pose_wlasl300.yaml
 
 ```bash
 python -m src.training.evaluate \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt \
     --split val \
     --output-dir eval_results
@@ -553,7 +529,7 @@ python -m src.training.evaluate \
 
 ```powershell
 python -m src.training.evaluate `
-    --config configs/pose_transformer.yaml `
+    --config configs/stgcn_ce.yaml `
     --checkpoint checkpoints/best_model.pt `
     --split val `
     --output-dir eval_results
@@ -569,7 +545,7 @@ This prints top-1/top-5 accuracy, per-class breakdown, and saves a confusion mat
 
 ```bash
 python -m src.inference.live_demo \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt \
     --camera 0 \
     --device cpu
@@ -579,7 +555,7 @@ python -m src.inference.live_demo \
 
 ```powershell
 python -m src.inference.live_demo `
-    --config configs/pose_transformer.yaml `
+    --config configs/stgcn_ce.yaml `
     --checkpoint checkpoints/best_model.pt `
     --camera 0 `
     --device cpu
@@ -602,19 +578,19 @@ The demo runs three threads: a capture thread reads webcam frames continuously, 
 # From a video file
 python -m src.inference.predict \
     --video path/to/video.mp4 \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt
 
 # From a pre-extracted keypoint .npy file
 python -m src.inference.predict \
     --keypoints data/processed/12345.npy \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt
 
 # Specify device (auto, cpu, cuda, mps)
 python -m src.inference.predict \
     --video path/to/video.mp4 \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt \
     --device cpu
 ```
@@ -625,19 +601,19 @@ python -m src.inference.predict \
 # From a video file
 python -m src.inference.predict `
     --video path\to\video.mp4 `
-    --config configs\pose_transformer.yaml `
+    --config configs\stgcn_ce.yaml `
     --checkpoint checkpoints\best_model.pt
 
 # From a pre-extracted keypoint .npy file
 python -m src.inference.predict `
     --keypoints data\processed\12345.npy `
-    --config configs\pose_transformer.yaml `
+    --config configs\stgcn_ce.yaml `
     --checkpoint checkpoints\best_model.pt
 
 # Specify device (auto, cpu, cuda, mps)
 python -m src.inference.predict `
     --video path\to\video.mp4 `
-    --config configs\pose_transformer.yaml `
+    --config configs\stgcn_ce.yaml `
     --checkpoint checkpoints\best_model.pt `
     --device cpu
 ```
@@ -652,7 +628,7 @@ Returns the predicted gloss, confidence score, and top-5 alternatives.
 
 ```bash
 python -m src.inference.export_onnx \
-    --config configs/pose_transformer.yaml \
+    --config configs/stgcn_ce.yaml \
     --checkpoint checkpoints/best_model.pt \
     --output model.onnx \
     --verify \
@@ -663,7 +639,7 @@ python -m src.inference.export_onnx \
 
 ```powershell
 python -m src.inference.export_onnx `
-    --config configs/pose_transformer.yaml `
+    --config configs/stgcn_ce.yaml `
     --checkpoint checkpoints/best_model.pt `
     --output model.onnx `
     --verify `
@@ -728,10 +704,7 @@ The `test_dependencies.py` file (110 tests) verifies that every third-party libr
 .
 ├── configs/
 │   ├── stgcn_ce.yaml            # Default config for cross-entropy training
-│   ├── stgcn_proto.yaml         # Config for prototypical few-shot training
-│   ├── pose_transformer.yaml    # Approach A defaults
-│   ├── video_classifier.yaml    # Approach B defaults
-│   └── fusion.yaml              # Approach C defaults
+│   └── stgcn_proto.yaml         # Config for prototypical few-shot training
 ├── data/
 │   ├── raw/                     # Downloaded video files — Kaggle or URL-based (shared)
 │   ├── processed/               # Extracted keypoints as .npy (shared across variants)
@@ -748,11 +721,8 @@ The `test_dependencies.py` file (110 tests) verifies that every third-party libr
 │   ├── models/
 │   │   ├── __init__.py          # Unified build_model() factory
 │   │   ├── stgcn.py             # ST-GCN encoder with body/hand graph branches
-│   │   ├── classifier.py        # STGCNClassifier: ST-GCN encoder + linear head
-│   │   ├── prototypical.py      # Prototypical network wrapper for few-shot
-│   │   ├── pose_transformer.py  # Transformer & BiLSTM (Approach A)
-│   │   ├── video_i3d.py         # 3D CNN backbones (Approach B)
-│   │   └── fusion.py            # Multi-modal fusion (Approach C)
+│   │   ├── classifier.py        # STGCNClassifier: ST-GCN encoder + two-layer head (CE)
+│   │   └── prototypical.py      # Prototypical network wrapper for few-shot
 │   ├── training/
 │   │   ├── config.py            # Config dataclass + YAML serialization
 │   │   ├── train.py             # CLI dispatcher for training
@@ -771,7 +741,7 @@ The `test_dependencies.py` file (110 tests) verifies that every third-party libr
 │   ├── test_evaluate.py         # Metrics, TTA flip, hard negatives, latency
 │   ├── test_export_onnx.py      # ONNX export & verification
 │   ├── test_live_demo.py        # FrameBuffer, prediction smoothing
-│   ├── test_models.py           # PoseTransformer, PoseBiLSTM, FusionModel
+│   ├── test_models.py           # STGCNEncoder, STGCNClassifier, PrototypicalNetwork
 │   ├── test_predict.py          # SignPredictor inference paths
 │   ├── test_preprocess.py       # Normalization, annotation parsing, splits
 │   ├── test_train.py            # Accuracy, mixup helpers
@@ -806,11 +776,10 @@ All hyperparameters live in YAML files under `configs/`. The table below shows *
 To reset all config files back to the recommended defaults:
 
 ```bash
-python scripts/reset_configs.py                # reset all three configs
-python scripts/reset_configs.py --only pose    # reset only pose_transformer.yaml
-python scripts/reset_configs.py --only video   # reset only video_classifier.yaml
-python scripts/reset_configs.py --only fusion  # reset only fusion.yaml
-python scripts/reset_configs.py --dry-run      # preview without writing
+python scripts/reset_configs.py                     # reset both configs
+python scripts/reset_configs.py --only stgcn_ce     # reset only stgcn_ce.yaml
+python scripts/reset_configs.py --only stgcn_proto  # reset only stgcn_proto.yaml
+python scripts/reset_configs.py --dry-run            # preview without writing
 ```
 
 ### Auto-Configure for Your Hardware
@@ -818,34 +787,31 @@ python scripts/reset_configs.py --dry-run      # preview without writing
 Detect your GPU/CPU and generate an optimized config automatically. The script probes CUDA VRAM, Apple Silicon MPS, or CPU, classifies your hardware into a performance tier, and writes a ready-to-train config:
 
 ```bash
-# Pose approach (recommended starting point)
-python scripts/auto_config.py --approach pose
+# Cross-entropy approach (recommended starting point)
+python scripts/auto_config.py --approach stgcn_ce
 
-# Video approach
-python scripts/auto_config.py --approach video --variant 100
-
-# Fusion approach
-python scripts/auto_config.py --approach fusion --variant 300
+# Prototypical approach (few-shot)
+python scripts/auto_config.py --approach stgcn_proto --variant 100
 
 # Preview without writing
-python scripts/auto_config.py --approach pose --dry-run
+python scripts/auto_config.py --approach stgcn_ce --dry-run
 
 # Force CPU mode (e.g. no GPU or Apple Silicon)
-python scripts/auto_config.py --approach pose --device cpu
+python scripts/auto_config.py --approach stgcn_ce --device cpu
 
 # Back up existing config before overwriting
-python scripts/auto_config.py --approach pose --backup
+python scripts/auto_config.py --approach stgcn_ce --backup
 ```
 
 **Hardware tiers** (auto-detected from CUDA VRAM):
 
 
-| Tier     | VRAM      | Pose `batch_size` | Video `batch_size` | `fp16` |
-| -------- | --------- | ----------------- | ------------------ | ------ |
-| **high** | >= 16 GB  | 64                | 16                 | true   |
-| **mid**  | >= 8 GB   | 32                | 8                  | true   |
-| **low**  | >= 4 GB   | 16                | 4                  | true   |
-| **cpu**  | MPS / CPU | 8                 | 4                  | false  |
+| Tier     | VRAM      | `batch_size` | `fp16` |
+| -------- | --------- | ------------ | ------ |
+| **high** | >= 16 GB  | 64           | true   |
+| **mid**  | >= 8 GB   | 32           | true   |
+| **low**  | >= 4 GB   | 16           | true   |
+| **cpu**  | MPS / CPU | 8            | false  |
 
 
 Windows (PowerShell / Command Prompt): the commands are identical — just run them in your terminal.
@@ -878,17 +844,14 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 
 | Parameter       | Description                                                                                           | Default            |
 | --------------- | ----------------------------------------------------------------------------------------------------- | ------------------ |
-| `approach`      | `stgcn_ce`, `stgcn_proto`, `pose_transformer`, `pose_bilstm`, `video`, `fusion`                       | `stgcn_ce`         |
-| `backbone`      | Video backbone: `r2plus1d_18`, `r3d_18`, `mc3_18`, `slow_r50`, `slowfast_r50`, `x3d_m`                | `r2plus1d_18`      |
-| `pretrained`    | Use pretrained backbone weights (Approach B/C)                                                        | `true`             |
-| `num_keypoints` | Number of MediaPipe landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face)           | `543`              |
-| `d_model`       | Transformer/LSTM embedding dimension (auto-scaled per variant: 128/192/256/384 for 100/300/1000/2000) | `128`              |
-| `nhead`         | Number of attention heads (auto-scaled per variant: 4/6/8/8 for 100/300/1000/2000)                    | `4`                |
-| `num_layers`    | Number of encoder layers (auto-scaled per variant: 2/4/5/6 for 100/300/1000/2000)                     | `2`                |
-| `dropout`       | Dropout rate (auto-scaled per variant: 0.1/0.3/0.4/0.5 for 100/300/1000/2000)                        | `0.5`              |
-| `use_motion`    | Concatenate velocity (frame differences) with position features                                       | `true`             |
-| `fusion`        | Fusion strategy: `concat` or `attention` (Approach C only)                                            | `concat`           |
-| `fusion_dim`    | Fusion layer dimension (Approach C only)                                                              | `256`              |
+| `approach`              | `stgcn_ce` or `stgcn_proto`                                                                    | `stgcn_ce`         |
+| `num_keypoints`         | Number of MediaPipe landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face)    | `543`              |
+| `d_model`               | ST-GCN embedding dimension (auto-scaled per variant: 128/192/256/384 for 100/300/1000/2000)    | `128`              |
+| `nhead`                 | Number of attention heads (auto-scaled per variant: 4/6/8/8 for 100/300/1000/2000)             | `4`                |
+| `num_layers`            | Number of encoder layers (auto-scaled per variant: 2/4/5/6 for 100/300/1000/2000)              | `2`                |
+| `dropout`               | Dropout rate (auto-scaled per variant: 0.1/0.3/0.4/0.5 for 100/300/1000/2000)                 | `0.5`              |
+| `use_motion`            | Concatenate velocity (frame differences) with position features                                 | `true`             |
+| `normalize_embeddings`  | L2-normalize encoder embeddings (`true` for proto distance-based, `false` for CE logit-based)  | `true`             |
 
 
 **Training:**
@@ -901,13 +864,13 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `lr`                      | Learning rate                                                    | `3e-4`     |
 | `weight_decay`            | AdamW weight decay                                               | `5e-4`     |
 | `warmup_epochs`           | Linear warmup epochs before scheduler takes over                 | `15`       |
-| `label_smoothing`         | Label smoothing for cross-entropy loss (0 = disabled)            | `0.1`      |
+| `label_smoothing`         | Label smoothing for cross-entropy loss (0 = disabled)            | `0.0`      |
 | `grad_clip`               | Max gradient norm for clipping                                   | `1.0`      |
 | `fp16`                    | Mixed-precision (FP16) training                                  | `true`     |
 | `weighted_sampling`       | Weighted sampler to counter class imbalance                      | `false`    |
 | `early_stopping_patience` | Epochs without val improvement before stopping                   | `50`       |
-| `mixup_alpha`             | Mixup interpolation strength (0 = disabled)                      | `0.2`      |
-| `head_dropout`            | Dropout before classification head (CE approach)                 | `0.3`      |
+| `mixup_alpha`             | Mixup interpolation strength (0 = disabled)                      | `0.0`      |
+| `head_dropout`            | Dropout before classification head (CE approach)                 | `0.2`      |
 | `scheduler`               | LR scheduler: `onecycle` or `cosine` (warmup + cosine annealing) | `cosine`   |
 
 
@@ -959,51 +922,56 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | WLASL1000 | 256       | 8       | 5            | 0.4       |
 | WLASL2000 | 384       | 8       | 6            | 0.5       |
 
-Dropout is intentionally low for smaller variants: a tiny model (d_model=128, 2 layers) paired with high dropout (≥0.5) applies so much regularisation that the gradient signal is crushed and the loss never decreases. The classification head uses the standard `LayerNorm → Dropout → Linear` order to avoid a train/eval distribution mismatch that arises when dropout is applied before normalisation.
+Dropout is intentionally low for smaller variants: a tiny model (d_model=128, 2 layers) paired with high dropout (≥0.5) applies so much regularisation that the gradient signal is crushed and the loss never decreases. The classification head uses a two-layer architecture: `Linear → BatchNorm1d → ReLU → Dropout → Linear` for a nonlinear decision surface.
 
 ---
 
 ## Approach Details
 
-### Approach A: Pose/Keypoint Transformer
+### ST-GCN Encoder (Shared)
 
-The recommended starting approach. MediaPipe Holistic extracts 543 landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face), centered on the shoulder midpoint and scaled by shoulder width. Hand landmarks are further normalized relative to their respective wrist (left hand indices 33-53 relative to wrist index 33, right hand indices 54-74 relative to wrist index 54), reducing noise from absolute wrist movement while preserving wrist position in the pose landmarks (indices 15, 16). When `use_motion: true` (default), frame-to-frame velocity is concatenated with position, producing 6 features per keypoint `(x, y, z, dx, dy, dz)`.
+MediaPipe Holistic extracts 543 landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face), centered on the shoulder midpoint and scaled by shoulder width. Hand landmarks are further normalized relative to their respective wrist, reducing noise from absolute wrist movement. When `use_motion: true` (default), frame-to-frame velocity is concatenated with position, producing 6 features per keypoint `(x, y, z, dx, dy, dz)`.
 
-Both `PoseTransformer` and `PoseBiLSTM` use a **multi-stage input projection** instead of a single linear layer. The projection performs gradual dimensionality reduction: `input_dim -> intermediate_dim -> d_model` with GELU activation (where `intermediate_dim = min(input_dim // 2, d_model * 4)`). This prevents the information bottleneck that can cause training to stall when projecting from the high-dimensional input (3258 features with motion) directly to `d_model`.
+The ST-GCN encoder processes keypoints through separate body (33 landmarks) and hand (21+21 landmarks) graph convolution branches, then fuses them into a single embedding vector.
 
 **Advantages:** Lightweight, fast inference, background-invariant.
 
-**Pipeline:** Video → MediaPipe → Shoulder-Centered Normalization → Hand-Relative Normalization → Motion Features → Augment → Transformer → Softmax
+**Pipeline:** Video → MediaPipe → Shoulder-Centered Normalization → Hand-Relative Normalization → Motion Features → Augment → ST-GCN → Classification
 
-**Data augmentation pipeline** (training only):
+### Cross-Entropy (`stgcn_ce`)
 
-- Temporal speed perturbation (0.8x–1.2x)
+Standard classification with an enhanced two-layer head (`Linear → BN → ReLU → Dropout → Linear`). Uses `normalize_embeddings: false` so encoder outputs are unconstrained (important — L2 normalization caps logit magnitudes and causes loss plateaus).
+
+**CE-specific augmentation** (milder than proto to avoid over-regularization with small datasets):
+
+- Temporal speed perturbation (0.85x–1.15x)
 - Random temporal crop to T frames
-- Temporal flip (p=0.3) — reverse temporal order for regularization
+- Keypoint horizontal flip with landmark swapping (p=0.5)
+- Keypoint yaw rotation (up to 15 degrees, p=0.5)
+- Keypoint rotation (up to 10 degrees, p=0.5)
+- Keypoint translation (up to 0.05 shift, p=0.5)
+- Keypoint noise (sigma=0.01)
+- Random scaling (0.95x–1.05x)
+- Keypoint dropout (frame=0.05, landmark=0.03, p=0.3)
+
+**Note:** No TemporalFlip (reversing a sign changes its meaning), no label smoothing, no mixup — these are counterproductive with ~8 samples/class.
+
+### Prototypical (`stgcn_proto`)
+
+Episodic N-way K-shot metric learning. Uses `normalize_embeddings: true` to project embeddings onto the unit sphere for distance-based classification.
+
+**Proto augmentation** (stronger regularization, includes TemporalFlip):
+
+- Temporal speed perturbation (0.7x–1.4x)
+- Random temporal crop to T frames
+- Temporal flip (p=0.3)
 - Keypoint horizontal flip with landmark swapping
-- Keypoint yaw rotation (up to 30 degrees, p=0.5) — rotates pose around the vertical (y) axis to simulate 3D camera viewpoint change; validated for 3–5x effective data multiplication in WLASL research
+- Keypoint yaw rotation (up to 30 degrees, p=0.5)
 - Keypoint rotation (up to 15 degrees)
 - Keypoint translation (up to 0.1 shift)
 - Keypoint noise (sigma=0.02)
 - Random scaling (0.9x–1.1x)
-- Keypoint dropout (frame-level and landmark-level)
-
-**Regularization:** Light mixup interpolation (`mixup_alpha: 0.15`), no label smoothing (avoids loss floor), variant-scaled dropout (0.1 for WLASL100, up to 0.5 for WLASL2000), weight decay (5e-4), and weighted sampling for class imbalance.
-
-### Approach B: RGB Video Classifier
-
-Uses pretrained 3D CNN backbones to classify raw video frames.
-
-**Supported backbones:** `r2plus1d_18`, `r3d_18`, `mc3_18` (torchvision), `slow_r50`, `slowfast_r50`, `x3d_m` (pytorchvideo)
-
-**Advantages:** Captures full visual context including texture and fine finger details.
-
-### Approach C: Hybrid Fusion
-
-Combines Approaches A and B. Two fusion modes:
-
-- `**concat`** — Concatenate pose and video feature vectors before the classification head.
-- `**attention**` — Cross-attention between pose tokens and video spatial features.
+- Keypoint dropout (frame=0.15, landmark=0.1, p=0.7)
 
 ---
 
@@ -1013,8 +981,8 @@ The `approach` field in your YAML config controls which model architecture and t
 
 1. **Change the config file:** Use `configs/stgcn_ce.yaml` for cross-entropy or `configs/stgcn_proto.yaml` for prototypical training.
 2. **Or edit the `approach` field** in your existing config:
-   - `approach: stgcn_ce` — Uses `STGCNClassifier` (ST-GCN encoder + linear head) trained with standard cross-entropy loss, label smoothing, and mixup. Best when all target classes are known at training time.
-   - `approach: stgcn_proto` — Uses `PrototypicalNetwork` (ST-GCN encoder + episodic metric learning) trained with N-way K-shot episodes. Best for few-shot classification or when you need to add new sign classes without retraining.
+   - `approach: stgcn_ce` — Uses `STGCNClassifier` (ST-GCN encoder + two-layer head) trained with standard cross-entropy loss. Uses `normalize_embeddings: false` and milder augmentation. Best when all target classes are known at training time.
+   - `approach: stgcn_proto` — Uses `PrototypicalNetwork` (ST-GCN encoder + episodic metric learning) trained with N-way K-shot episodes. Uses `normalize_embeddings: true` and stronger augmentation. Best for few-shot classification or when you need to add new sign classes without retraining.
 
 Both approaches share the same ST-GCN encoder (`src/models/stgcn.py`) and data pipeline. The unified `build_model()` factory in `src/models/__init__.py` dispatches to the correct model based on `cfg.approach`.
 
@@ -1109,7 +1077,7 @@ print(f'Classes with <=2 samples: {(counts<=2).sum()}')
 "
 ```
 
-**If effective samples < 500:** Training will be very challenging. The default `configs/pose_transformer.yaml` is already tuned for this scenario (high dropout, weighted sampling, low LR). Expect 30–50% top-1 accuracy.
+**If effective samples < 500:** Training will be very challenging. The default `configs/stgcn_ce.yaml` is tuned for this scenario (milder augmentation, no label smoothing/mixup, weighted sampling). Expect 30–50% top-1 accuracy with CE, or try `stgcn_proto` for better few-shot performance.
 
 **To get more data:**
 
@@ -1135,17 +1103,18 @@ These are tuned starting points for each dataset variant. Copy the base config a
 approach: stgcn_ce
 wlasl_variant: 100
 T: 64
-use_motion: true            # velocity features (position + frame differences)
-label_smoothing: 0.1        # cross-entropy label smoothing
-mixup_alpha: 0.2            # mixup interpolation strength
-head_dropout: 0.3           # dropout before classification head
-batch_size: 64
-lr: 3.0e-4
+use_motion: true               # velocity features (position + frame differences)
+normalize_embeddings: false    # CRITICAL for CE — do not enable
+label_smoothing: 0.0           # disabled (counterproductive with ~8 samples/class)
+mixup_alpha: 0.0               # disabled (counterproductive with ~8 samples/class)
+head_dropout: 0.2              # dropout in two-layer classification head
+batch_size: 32
+lr: 1.0e-3
 scheduler: cosine
-warmup_epochs: 15
-weighted_sampling: true     # important — classes are imbalanced
-early_stopping_patience: 50
-epochs: 250
+warmup_epochs: 10
+weighted_sampling: true        # important — classes are imbalanced
+early_stopping_patience: 30
+epochs: 200
 ```
 
 **Alternative: Prototypical training** (best for few-shot scenarios with ~3-8 samples/class):
@@ -1155,13 +1124,13 @@ approach: stgcn_proto
 wlasl_variant: 100
 T: 64
 use_motion: true
-batch_size: 64
-lr: 3.0e-4
+normalize_embeddings: true     # required for distance-based classification
+batch_size: 16
+lr: 1.0e-3
 scheduler: cosine
-warmup_epochs: 15
-weighted_sampling: true
-early_stopping_patience: 50
-epochs: 250
+warmup_epochs: 10
+early_stopping_patience: 30
+epochs: 200
 ```
 
 With very few training videos (<500 usable), reduce batch size:
@@ -1176,21 +1145,16 @@ lr: 1.0e-4
 ~5,000 annotations, 300 glosses. More data per class on average. Model scales up automatically (`d_model=192`, `nhead=6`, `num_layers=4`) via `Config.__post_init__`.
 
 ```yaml
-approach: pose_transformer
+approach: stgcn_ce
 wlasl_variant: 300
 T: 64
-d_model: 192                # auto-derived from wlasl_variant
-nhead: 6                    # auto-derived from wlasl_variant
-num_layers: 4               # auto-derived from wlasl_variant
-dropout: 0.3                # auto-derived
+normalize_embeddings: false
 batch_size: 32
-lr: 3.0e-4
+lr: 1.0e-3
 scheduler: cosine
-warmup_epochs: 15
-label_smoothing: 0.0
-mixup_alpha: 0.15
+warmup_epochs: 10
 weighted_sampling: true
-early_stopping_patience: 50
+early_stopping_patience: 30
 epochs: 300
 ```
 
@@ -1199,21 +1163,16 @@ epochs: 300
 Much larger class count. Needs more model capacity and training time. Model scales up automatically (`d_model=256`, `nhead=8`, `num_layers=5`) via `Config.__post_init__`.
 
 ```yaml
-approach: pose_transformer
+approach: stgcn_ce
 wlasl_variant: 1000
 T: 64
-d_model: 256                # auto-derived from wlasl_variant
-nhead: 8                    # auto-derived from wlasl_variant
-num_layers: 5               # auto-derived from wlasl_variant
-dropout: 0.4                # auto-derived
+normalize_embeddings: false
 batch_size: 64
-lr: 3.0e-4
+lr: 1.0e-3
 scheduler: cosine
-warmup_epochs: 15
-label_smoothing: 0.0
-mixup_alpha: 0.15
+warmup_epochs: 10
 weighted_sampling: true
-early_stopping_patience: 50
+early_stopping_patience: 30
 epochs: 350
 ```
 
@@ -1222,57 +1181,17 @@ epochs: 350
 Largest variant. Model scales up to `d_model=384`, `nhead=8`, `num_layers=6` via `Config.__post_init__`.
 
 ```yaml
-approach: pose_transformer
+approach: stgcn_ce
 wlasl_variant: 2000
 T: 64
-d_model: 384                # auto-derived from wlasl_variant
-nhead: 8                    # auto-derived from wlasl_variant
-num_layers: 6               # auto-derived from wlasl_variant
-dropout: 0.5                # auto-derived
+normalize_embeddings: false
 batch_size: 64
-lr: 3.0e-4
+lr: 1.0e-3
 scheduler: cosine
-warmup_epochs: 15
-label_smoothing: 0.0
-mixup_alpha: 0.15
+warmup_epochs: 10
 weighted_sampling: true
-early_stopping_patience: 50
+early_stopping_patience: 30
 epochs: 400
-```
-
-For WLASL2000, consider the video approach (Approach B) or fusion (Approach C) — the added visual detail helps disambiguate the larger vocabulary.
-
-### Video Classifier (Approach B)
-
-Use when you have sufficient GPU memory and want to leverage pretrained RGB features.
-
-```yaml
-approach: video
-backbone: r2plus1d_18
-pretrained: true
-T: 64                     # T=64 on high/mid GPU; reduce to 48 (low) or 32 (cpu) if needed
-image_size: 224            # reduce to 112 if GPU memory is tight
-batch_size: 8              # 3D CNNs need small batches
-lr: 1.0e-4                 # lower LR for finetuning pretrained backbone
-dropout: 0.3
-fp16: true                 # essential for video models
-```
-
-### Fusion (Approach C)
-
-Combines Approaches A and B for highest accuracy. Requires both keypoints and raw videos.
-
-```yaml
-approach: fusion
-fusion: concat             # start with concat, try attention if concat plateaus
-fusion_dim: 256
-backbone: r2plus1d_18
-pretrained: true
-T: 64
-batch_size: 8
-lr: 1.0e-4
-dropout: 0.3
-fp16: true
 ```
 
 ---
@@ -1289,7 +1208,7 @@ batch_size: 8              # smaller batches to avoid memory pressure
 num_workers: 2
 ```
 
-Stick to Approach A (pose_transformer). Video models are too slow on CPU for training (inference is manageable).
+Stick to keypoint-based approaches (`stgcn_ce` or `stgcn_proto`). They are lightweight and run well on CPU.
 
 **GPU / CUDA**
 
@@ -1299,7 +1218,7 @@ batch_size: 32             # increase to fill GPU memory (or 64 for large GPUs)
 num_workers: 4
 ```
 
-Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_size` first, then `T`, then `image_size` (for video models).
+Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_size` first, then `T`.
 
 **Apple Silicon (M1/M2/M3)**
 
@@ -1312,35 +1231,32 @@ Monitor GPU memory with `nvidia-smi`. If you run out of memory, reduce `batch_si
 WLASL's expired URLs mean you may only get 30–60% of the annotated videos. When your training set is small (<500 samples for 100 classes):
 
 1. **Enable weighted sampling** (`weighted_sampling: true`) — ensures every class is seen equally despite imbalance.
-2. **Increase dropout** to 0.5 to reduce overfitting (WLASL-specific research uses 0.5–0.7 for ~6–8 samples/class).
-3. **Increase label smoothing** to 0.15–0.2 for better calibration.
-4. **Use smaller batch sizes** (8–16) so the model sees more update steps per epoch.
-5. **Lower the learning rate** to 1e-4 with cosine scheduler.
-6. **Try BiLSTM** (`approach: pose_bilstm`) — fewer parameters, less prone to overfitting on tiny datasets.
-7. **Download from Kaggle** (`python scripts/download_kaggle.py`) — the full ~12K video archive is available as a single download.
+2. **Use smaller batch sizes** (8–16) so the model sees more update steps per epoch.
+3. **Try prototypical training** (`approach: stgcn_proto`) — designed for few-shot scenarios with ~3-8 samples/class.
+4. **Keep label smoothing and mixup disabled** (`label_smoothing: 0.0`, `mixup_alpha: 0.0`) — counterproductive with small datasets.
+5. **Download from Kaggle** (`python scripts/download_kaggle.py`) — the full ~12K video archive is available as a single download.
 
 ### Improving Accuracy
 
-- **Start with Approach A** (pose_transformer). It trains fastest and is easiest to debug.
+- **Start with `stgcn_ce`** — it trains fastest and is easiest to debug.
 - **Enable motion features** (`use_motion: true`) — velocity information captures signing dynamics and typically adds 5–8% accuracy.
-- **Use light mixup** (`mixup_alpha: 0.15`) — regularizes training without preventing confident predictions. Higher values floor the loss.
-- **Disable label smoothing** (`label_smoothing: 0.0`) — label smoothing creates an artificial loss floor (~0.23 for 100 classes). Remove it for lowest loss.
+- **Disable label smoothing and mixup** for small datasets — they are counterproductive with ~8 samples/class.
+- **Set `normalize_embeddings: false` for CE** — L2 normalization caps logit magnitudes and causes loss plateaus.
 - **Enable TTA for evaluation** (`use_tta: true`) — averages predictions over original + horizontally flipped input for 2–4% evaluation boost.
 - **Use the error analysis notebook** (`notebooks/03_error_analysis.ipynb`) to find which classes are confused, then inspect those videos manually.
 - **Use cosine scheduler** (`scheduler: cosine`) — cosine annealing with warm-up converges better than onecycle for long training runs.
-- **Increase sequence length** (`T: 96` or `T: 128`) if signs in your dataset are long — some signs take 3+ seconds at 64 fps (the default frame extraction rate).
-- **Scale up to fusion** (Approach C) once you've maxed out Approach A's accuracy — it typically adds 3–8% top-1 over pose-only.
+- **Increase sequence length** (`T: 96` or `T: 128`) if signs in your dataset are long.
 
 ### What to Expect
 
 Realistic accuracy ranges depend heavily on how many videos you have:
 
 
-| Dataset  | Training Samples | Approach A (expected) | Approach C (expected) |
-| -------- | ---------------- | --------------------- | --------------------- |
-| WLASL100 | 400–800          | 45–60% top-1          | 55–68% top-1          |
-| WLASL100 | 800–1,500        | 60–70% top-1          | 68–78% top-1          |
-| WLASL300 | 2,000–4,000      | 45–55% top-1          | 55–65% top-1          |
+| Dataset  | Training Samples | stgcn_ce (expected) | stgcn_proto (expected) |
+| -------- | ---------------- | ------------------- | ---------------------- |
+| WLASL100 | 400–800          | 45–55% top-1        | ~100% (few-shot)       |
+| WLASL100 | 800–1,500        | 55–65% top-1        | ~100% (few-shot)       |
+| WLASL300 | 2,000–4,000      | 40–50% top-1        | varies by N-way        |
 
 
 If your val loss is around `ln(num_classes)` (e.g., 4.6 for 100 classes), the model is near random — check that enough training samples are being loaded.

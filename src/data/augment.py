@@ -520,6 +520,39 @@ def get_train_transforms(T: int = 64) -> Compose:
     )
 
 
+def get_ce_train_transforms(T: int = 64) -> Compose:
+    """Return a milder training augmentation pipeline for cross-entropy training.
+
+    Designed for small datasets (~8 samples/class) where aggressive
+    augmentation destroys signal.  Key differences from ``get_train_transforms``:
+    - No ``TemporalFlip`` (reversing a sign changes its meaning)
+    - Narrower speed perturbation, rotation, noise, and dropout ranges
+
+    Parameters
+    ----------
+    T : int
+        Target sequence length.
+
+    Returns
+    -------
+    Compose
+        A composed pipeline of mild augmentations.
+    """
+    return Compose(
+        [
+            TemporalSpeedPerturb(low=0.85, high=1.15),
+            TemporalCrop(T=T),
+            KeypointHorizontalFlip(p=0.5, centered=True),
+            KeypointYawRotation(max_angle=15, p=0.5),
+            KeypointRotation(max_angle=10, p=0.5),
+            KeypointTranslation(max_shift=0.05, p=0.5),
+            KeypointNoise(sigma=0.01),
+            KeypointScale(low=0.95, high=1.05),
+            KeypointDropout(frame_drop_rate=0.05, landmark_drop_rate=0.03, p=0.3),
+        ]
+    )
+
+
 def get_val_transforms(T: int = 64) -> Compose:
     """Return the default validation/test augmentation pipeline.
 

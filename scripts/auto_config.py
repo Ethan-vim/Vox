@@ -8,12 +8,11 @@ approach and WLASL variant.
 Usage:
     python scripts/auto_config.py --approach stgcn_ce
     python scripts/auto_config.py --approach stgcn_ce --variant 100
-    python scripts/auto_config.py --approach pose
-    python scripts/auto_config.py --approach video --variant 100
-    python scripts/auto_config.py --approach fusion --variant 300
-    python scripts/auto_config.py --approach pose --dry-run
-    python scripts/auto_config.py --approach pose --device cpu
-    python scripts/auto_config.py --approach pose --backup
+    python scripts/auto_config.py --approach stgcn_proto
+    python scripts/auto_config.py --approach stgcn_proto --variant 300
+    python scripts/auto_config.py --approach stgcn_ce --dry-run
+    python scripts/auto_config.py --approach stgcn_ce --device cpu
+    python scripts/auto_config.py --approach stgcn_proto --backup
 """
 
 import argparse
@@ -27,21 +26,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = PROJECT_ROOT / "configs"
 
-VALID_APPROACHES = ("stgcn_ce", "pose", "video", "fusion")
+VALID_APPROACHES = ("stgcn_ce", "stgcn_proto")
 VALID_VARIANTS = (100, 300, 1000, 2000)
 
 APPROACH_TO_FILE = {
     "stgcn_ce": "stgcn_ce.yaml",
-    "pose": "pose_transformer.yaml",
-    "video": "video_classifier.yaml",
-    "fusion": "fusion.yaml",
+    "stgcn_proto": "stgcn_proto.yaml",
 }
 
 APPROACH_TO_NAME = {
     "stgcn_ce": "stgcn_ce",
-    "pose": "pose_transformer",
-    "video": "video",
-    "fusion": "fusion",
+    "stgcn_proto": "stgcn_proto",
 }
 
 
@@ -202,9 +197,10 @@ def build_config_values(
             "num_layers": 3,
             "dropout": 0.1,
             "embedding_dim": 128,
-            "label_smoothing": 0.1,
-            "mixup_alpha": 0.2,
-            "head_dropout": 0.3,
+            "normalize_embeddings": False,
+            "label_smoothing": 0.0,
+            "mixup_alpha": 0.0,
+            "head_dropout": 0.2,
             "num_workers": 4,
             "batch_size": 32,
             "lr": 1e-3,
@@ -217,140 +213,38 @@ def build_config_values(
             "scheduler": "cosine",
             "epochs": 200,
         }
-    elif approach == "pose":
+    else:  # stgcn_proto
         cfg = {
-            "approach": "pose_transformer",
+            "approach": "stgcn_proto",
             "wlasl_variant": variant,
             "num_keypoints": 543,
             "T": 64,
             "use_motion": True,
             "d_model": 128,
-            "nhead": 4,
-            "num_layers": 2,
+            "gcn_channels": [64, 128, 128],
+            "num_layers": 3,
             "dropout": 0.1,
+            "normalize_embeddings": True,
+            "n_way": 10,
+            "k_shot": 3,
+            "q_query": 2,
+            "num_episodes": 200,
             "num_workers": 4,
-            "batch_size": 32,
-            "lr": 3e-4,
-            "weight_decay": 5e-4,
-            "warmup_epochs": 15,
-            "label_smoothing": 0.0,
+            "batch_size": 16,
+            "lr": 1e-3,
+            "weight_decay": 1e-4,
+            "warmup_epochs": 10,
             "grad_clip": 1.0,
-            "fp16": True,
-            "weighted_sampling": True,
-            "early_stopping_patience": 50,
-            "mixup_alpha": 0.15,
+            "fp16": False,
+            "weighted_sampling": False,
+            "early_stopping_patience": 30,
             "scheduler": "cosine",
-            "epochs": 250,
+            "epochs": 200,
             "use_tta": False,
         }
-    elif approach == "video":
-        cfg = {
-            "approach": "video",
-            "backbone": "r2plus1d_18",
-            "pretrained": True,
-            "wlasl_variant": variant,
-            "T": 64,
-            "image_size": 224,
-            "dropout": 0.3,
-            "num_workers": 4,
-            "batch_size": 8,
-            "lr": 1e-4,
-            "weight_decay": 5e-4,
-            "warmup_epochs": 10,
-            "label_smoothing": 0.0,
-            "grad_clip": 1.0,
-            "fp16": True,
-            "weighted_sampling": False,
-            "early_stopping_patience": 40,
-            "scheduler": "cosine",
-            "epochs": 250,
-        }
-    else:  # fusion
-        cfg = {
-            "approach": "fusion",
-            "fusion": "concat",
-            "fusion_dim": 256,
-            "backbone": "r2plus1d_18",
-            "pretrained": True,
-            "num_keypoints": 543,
-            "wlasl_variant": variant,
-            "T": 64,
-            "image_size": 224,
-            "d_model": 128,
-            "nhead": 4,
-            "num_layers": 2,
-            "dropout": 0.1,
-            "num_workers": 4,
-            "batch_size": 8,
-            "lr": 1e-4,
-            "weight_decay": 5e-4,
-            "warmup_epochs": 10,
-            "label_smoothing": 0.0,
-            "grad_clip": 1.0,
-            "fp16": True,
-            "weighted_sampling": False,
-            "early_stopping_patience": 40,
-            "mixup_alpha": 0.1,
-            "scheduler": "cosine",
-            "epochs": 250,
-        }
-
-    # --- Variant-specific overrides (pose approach) ---
-    # Architecture and dropout must scale together — a tiny model with high
-    # dropout has so much gradient noise that the loss never decreases.
-    # These values match Config.__post_init__ in src/training/config.py.
-    if approach == "pose":
-        if variant == 100:
-            cfg.update({
-                "d_model": 128,
-                "nhead": 4,
-                "num_layers": 2,
-                "dropout": 0.1,
-            })
-        elif variant == 300:
-            cfg.update({
-                "d_model": 192,
-                "nhead": 6,
-                "num_layers": 4,
-                "dropout": 0.3,
-                "epochs": 300,
-            })
-        elif variant == 1000:
-            cfg.update({
-                "d_model": 256,
-                "nhead": 8,
-                "num_layers": 5,
-                "dropout": 0.4,
-                "epochs": 350,
-            })
-        elif variant >= 2000:
-            cfg.update({
-                "d_model": 384,
-                "nhead": 8,
-                "num_layers": 6,
-                "dropout": 0.5,
-                "epochs": 400,
-            })
-
-    # --- Variant-specific overrides (video/fusion) ---
-    if approach in ("video", "fusion") and variant >= 300:
-        cfg["epochs"] = 300
-    if approach in ("video", "fusion") and variant >= 1000:
-        cfg["epochs"] = 350
-    if approach in ("video", "fusion") and variant >= 2000:
-        cfg["epochs"] = 400
-
-    # Scale fusion sub-model architecture with variant (matches Config.__post_init__)
-    if approach == "fusion":
-        if variant == 300:
-            cfg.update({"d_model": 192, "nhead": 6, "num_layers": 4, "dropout": 0.3})
-        elif variant == 1000:
-            cfg.update({"d_model": 256, "nhead": 8, "num_layers": 5, "dropout": 0.4})
-        elif variant >= 2000:
-            cfg.update({"d_model": 384, "nhead": 8, "num_layers": 6, "dropout": 0.5})
 
     # --- Tier-specific overrides (hardware-dependent) ---
-    tier_overrides = _get_tier_overrides(approach, tier, hw)
+    tier_overrides = _get_tier_overrides(tier, hw)
     cfg.update(tier_overrides)
 
     # Common settings across all configs
@@ -373,32 +267,13 @@ def build_config_values(
     return cfg
 
 
-def _get_tier_overrides(approach: str, tier: str, hw: HardwareInfo) -> dict:
+def _get_tier_overrides(tier: str, hw: HardwareInfo) -> dict:
     """Get hardware-dependent parameter overrides for a tier."""
     overrides: dict = {}
 
-    if approach == "stgcn_ce":
-        batch_map = {"high": 64, "mid": 32, "low": 16, "cpu": 8}
-        overrides["batch_size"] = batch_map[tier]
-    elif approach == "pose":
-        batch_map = {"high": 64, "mid": 32, "low": 16, "cpu": 8}
-        t_map = {"high": 64, "mid": 64, "low": 64, "cpu": 64}
-        overrides["batch_size"] = batch_map[tier]
-        overrides["T"] = t_map[tier]
-    elif approach == "video":
-        batch_map = {"high": 16, "mid": 8, "low": 4, "cpu": 4}
-        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 32}
-        img_map = {"high": 224, "mid": 224, "low": 112, "cpu": 112}
-        overrides["batch_size"] = batch_map[tier]
-        overrides["T"] = t_map[tier]
-        overrides["image_size"] = img_map[tier]
-    else:  # fusion
-        batch_map = {"high": 16, "mid": 8, "low": 4, "cpu": 4}
-        t_map = {"high": 64, "mid": 64, "low": 48, "cpu": 48}
-        img_map = {"high": 224, "mid": 224, "low": 112, "cpu": 112}
-        overrides["batch_size"] = batch_map[tier]
-        overrides["T"] = t_map[tier]
-        overrides["image_size"] = img_map[tier]
+    # Both stgcn_ce and stgcn_proto use the same batch size tiers
+    batch_map = {"high": 64, "mid": 32, "low": 16, "cpu": 8}
+    overrides["batch_size"] = batch_map[tier]
 
     # FP16 only on CUDA
     overrides["fp16"] = hw.device == "cuda"
@@ -425,7 +300,7 @@ def render_yaml(approach: str, values: dict, hw: HardwareInfo, tier: str) -> str
     Parameters
     ----------
     approach : str
-        "stgcn_ce", "pose", "video", or "fusion".
+        "stgcn_ce" or "stgcn_proto".
     values : dict
         Config values from ``build_config_values``.
     hw : HardwareInfo
@@ -466,14 +341,15 @@ T: {values['T']}
 use_motion: {_bool(values['use_motion'])}
 use_augmentation: {_bool(values['use_augmentation'])}
 
-# Model
+# Model (ST-GCN encoder)
 d_model: {values['d_model']}
 gcn_channels: {gcn_str}
 num_layers: {values['num_layers']}
 dropout: {values['dropout']}
 embedding_dim: {values['embedding_dim']}
+normalize_embeddings: {_bool(values['normalize_embeddings'])}
 
-# Cross-entropy
+# Cross-entropy training
 label_smoothing: {values['label_smoothing']}
 mixup_alpha: {values['mixup_alpha']}
 head_dropout: {values['head_dropout']}
@@ -496,27 +372,28 @@ data_dir: {values['data_dir']}
 checkpoint_dir: {values['checkpoint_dir']}
 """
 
-    elif approach == "pose":
+    else:  # stgcn_proto
+        gcn_str = str(values["gcn_channels"])
         body = f"""\
 approach: {values['approach']}
 wlasl_variant: {values['wlasl_variant']}
 # num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
 num_keypoints: {values['num_keypoints']}
-
-# Temporal
 T: {values['T']}
-
-# Features
 use_motion: {_bool(values['use_motion'])}
 
-# Model architecture
+# Model (ST-GCN encoder)
 d_model: {values['d_model']}
-nhead: {values['nhead']}
+gcn_channels: {gcn_str}
 num_layers: {values['num_layers']}
 dropout: {values['dropout']}
+normalize_embeddings: {_bool(values['normalize_embeddings'])}
 
-# Data loading
-num_workers: {values['num_workers']}
+# Prototypical training
+n_way: {values['n_way']}
+k_shot: {values['k_shot']}
+q_query: {values['q_query']}
+num_episodes: {values['num_episodes']}
 
 # Training
 epochs: {values['epochs']}
@@ -524,129 +401,14 @@ batch_size: {values['batch_size']}
 lr: {_lr(values['lr'])}
 weight_decay: {_lr(values['weight_decay'])}
 warmup_epochs: {values['warmup_epochs']}
-label_smoothing: {values['label_smoothing']}
 grad_clip: {values['grad_clip']}
 fp16: {_bool(values['fp16'])}
-weighted_sampling: {_bool(values['weighted_sampling'])}
 early_stopping_patience: {values['early_stopping_patience']}
-mixup_alpha: {values['mixup_alpha']}
-
-# Scheduler
 scheduler: {values['scheduler']}
+num_workers: {values['num_workers']}
 
 # Evaluation
 use_tta: {_bool(values['use_tta'])}
-
-# Logging
-use_wandb: {_bool(values['use_wandb'])}
-use_tensorboard: {_bool(values['use_tensorboard'])}
-log_interval: {values['log_interval']}
-
-# Inference
-confidence_threshold: {values['confidence_threshold']}
-smoothing_window: {values['smoothing_window']}
-buffer_size: {values['buffer_size']}
-fps_display: {_bool(values['fps_display'])}
-
-# Paths
-data_dir: {values['data_dir']}
-output_dir: {values['output_dir']}
-checkpoint_dir: {values['checkpoint_dir']}
-log_dir: {values['log_dir']}
-"""
-
-    elif approach == "video":
-        body = f"""\
-approach: {values['approach']}
-backbone: {values['backbone']}
-pretrained: {_bool(values['pretrained'])}
-wlasl_variant: {values['wlasl_variant']}
-# num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
-
-# Temporal & spatial
-T: {values['T']}
-image_size: {values['image_size']}
-
-# Model
-dropout: {values['dropout']}
-
-# Data loading
-num_workers: {values['num_workers']}
-
-# Training
-epochs: {values['epochs']}
-batch_size: {values['batch_size']}
-lr: {_lr(values['lr'])}
-weight_decay: {_lr(values['weight_decay'])}
-warmup_epochs: {values['warmup_epochs']}
-label_smoothing: {values['label_smoothing']}
-grad_clip: {values['grad_clip']}
-fp16: {_bool(values['fp16'])}
-weighted_sampling: {_bool(values['weighted_sampling'])}
-early_stopping_patience: {values['early_stopping_patience']}
-
-# Scheduler
-scheduler: {values['scheduler']}
-
-# Logging
-use_wandb: {_bool(values['use_wandb'])}
-use_tensorboard: {_bool(values['use_tensorboard'])}
-log_interval: {values['log_interval']}
-
-# Inference
-confidence_threshold: {values['confidence_threshold']}
-smoothing_window: {values['smoothing_window']}
-buffer_size: {values['buffer_size']}
-fps_display: {_bool(values['fps_display'])}
-
-# Paths
-data_dir: {values['data_dir']}
-output_dir: {values['output_dir']}
-checkpoint_dir: {values['checkpoint_dir']}
-log_dir: {values['log_dir']}
-"""
-
-    else:  # fusion
-        body = f"""\
-approach: {values['approach']}
-fusion: {values['fusion']}
-fusion_dim: {values['fusion_dim']}
-
-# Sub-model configs
-backbone: {values['backbone']}
-pretrained: {_bool(values['pretrained'])}
-num_keypoints: {values['num_keypoints']}
-
-# Dataset
-wlasl_variant: {values['wlasl_variant']}
-# num_classes is auto-derived from wlasl_variant (100 -> 100, 300 -> 300, etc.)
-T: {values['T']}
-image_size: {values['image_size']}
-
-# Pose Transformer settings
-d_model: {values['d_model']}
-nhead: {values['nhead']}
-num_layers: {values['num_layers']}
-dropout: {values['dropout']}
-
-# Data loading
-num_workers: {values['num_workers']}
-
-# Training
-epochs: {values['epochs']}
-batch_size: {values['batch_size']}
-lr: {_lr(values['lr'])}
-weight_decay: {_lr(values['weight_decay'])}
-warmup_epochs: {values['warmup_epochs']}
-label_smoothing: {values['label_smoothing']}
-grad_clip: {values['grad_clip']}
-fp16: {_bool(values['fp16'])}
-weighted_sampling: {_bool(values['weighted_sampling'])}
-early_stopping_patience: {values['early_stopping_patience']}
-mixup_alpha: {values['mixup_alpha']}
-
-# Scheduler
-scheduler: {values['scheduler']}
 
 # Logging
 use_wandb: {_bool(values['use_wandb'])}
@@ -714,7 +476,7 @@ def print_summary(
     print(f"  T               : {values['T']}")
     print(f"  fp16            : {values['fp16']}")
     print(f"  num_workers     : {values['num_workers']}")
-    if "image_size" in values and approach != "pose":
+    if "image_size" in values:
         print(f"  image_size      : {values['image_size']}")
     print(f"  lr              : {values['lr']}")
     print(f"  epochs          : {values['epochs']}")
@@ -735,11 +497,11 @@ def main() -> None:
 examples:
   python scripts/auto_config.py --approach stgcn_ce
   python scripts/auto_config.py --approach stgcn_ce --variant 100
-  python scripts/auto_config.py --approach pose
-  python scripts/auto_config.py --approach video --variant 100
-  python scripts/auto_config.py --approach fusion --variant 300 --dry-run
-  python scripts/auto_config.py --approach pose --device cpu
-  python scripts/auto_config.py --approach pose --backup
+  python scripts/auto_config.py --approach stgcn_proto
+  python scripts/auto_config.py --approach stgcn_proto --variant 300
+  python scripts/auto_config.py --approach stgcn_ce --dry-run
+  python scripts/auto_config.py --approach stgcn_ce --device cpu
+  python scripts/auto_config.py --approach stgcn_proto --backup
 """,
     )
     parser.add_argument(
@@ -747,7 +509,7 @@ examples:
         type=str,
         required=True,
         choices=list(VALID_APPROACHES),
-        help="Model approach: stgcn_ce (recommended), pose, video, or fusion",
+        help="Model approach: stgcn_ce (recommended) or stgcn_proto",
     )
     parser.add_argument(
         "--variant",

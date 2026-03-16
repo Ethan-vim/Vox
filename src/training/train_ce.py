@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from src.data.augment import get_train_transforms, get_val_transforms, mixup_data, mixup_criterion
+from src.data.augment import get_ce_train_transforms, get_val_transforms, mixup_data, mixup_criterion
 from src.data.dataset import WLASLKeypointDataset, get_dataloader
 from src.models.classifier import build_classifier
 from src.training.config import Config, load_config, save_config
@@ -232,7 +232,7 @@ def main(cfg: Config) -> None:
             f"--subset WLASL{cfg.wlasl_variant}"
         )
 
-    train_transform = get_train_transforms(T=cfg.T)
+    train_transform = get_ce_train_transforms(T=cfg.T)
     val_transform = get_val_transforms(T=cfg.T)
 
     train_ds = WLASLKeypointDataset(

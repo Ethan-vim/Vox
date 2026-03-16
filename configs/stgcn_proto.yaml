@@ -18,6 +18,7 @@ d_model: 128
 gcn_channels: [64, 128, 128]
 num_layers: 3
 dropout: 0.1
+normalize_embeddings: true
 
 # Prototypical training
 n_way: 10

@@ -68,6 +68,10 @@ class TestConfigDefaults:
         cfg = Config()
         assert cfg.use_tta is False
 
+    def test_normalize_embeddings_default(self):
+        cfg = Config()
+        assert cfg.normalize_embeddings is True
+
 
 class TestLoadConfig:
     def test_load_minimal(self, tmp_path):
@@ -85,7 +89,7 @@ class TestLoadConfig:
 
     def test_load_full_yaml(self, tmp_config_yaml):
         cfg = load_config(tmp_config_yaml)
-        assert cfg.approach == "pose_transformer"
+        assert cfg.approach == "stgcn_ce"
         assert cfg.T == 16
         assert cfg.d_model == 64
 

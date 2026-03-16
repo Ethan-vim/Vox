@@ -70,7 +70,7 @@ def tmp_config_yaml(tmp_path):
     """Write a minimal YAML config file and return its path."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
-        "approach: pose_transformer\n"
+        "approach: stgcn_ce\n"
         "wlasl_variant: 10\n"
         "T: 16\n"
         "d_model: 64\n"

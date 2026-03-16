@@ -145,82 +145,61 @@ class TestDetermineTier:
 
 
 class TestBuildConfigValues:
-    def test_pose_mid_100(self, cuda_hw):
-        cfg = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
-        assert cfg["approach"] == "pose_transformer"
+    def test_stgcn_ce_mid(self, cuda_hw):
+        cfg = auto_config.build_config_values("stgcn_ce", 100, "mid", cuda_hw)
+        assert cfg["approach"] == "stgcn_ce"
         assert cfg["batch_size"] == 32
         assert cfg["T"] == 64
         assert cfg["fp16"] is True
         assert cfg["wlasl_variant"] == 100
         assert cfg["d_model"] == 128
-        assert cfg["num_layers"] == 2
-        assert cfg["dropout"] == 0.1
+        assert cfg["label_smoothing"] == 0.0
+        assert cfg["mixup_alpha"] == 0.0
+        assert cfg["head_dropout"] == 0.2
 
-    def test_pose_cpu_100(self, cpu_hw):
-        cfg = auto_config.build_config_values("pose", 100, "cpu", cpu_hw)
+    def test_stgcn_ce_cpu(self, cpu_hw):
+        cfg = auto_config.build_config_values("stgcn_ce", 100, "cpu", cpu_hw)
         assert cfg["batch_size"] == 8
-        assert cfg["T"] == 64
         assert cfg["fp16"] is False
         assert cfg["num_workers"] == 2
 
-    def test_pose_high_300(self, high_cuda_hw):
-        cfg = auto_config.build_config_values("pose", 300, "high", high_cuda_hw)
+    def test_stgcn_ce_high(self, high_cuda_hw):
+        cfg = auto_config.build_config_values("stgcn_ce", 300, "high", high_cuda_hw)
         assert cfg["batch_size"] == 64
-        assert cfg["d_model"] == 192
-        assert cfg["nhead"] == 6
-        assert cfg["num_layers"] == 4
-        assert cfg["scheduler"] == "cosine"
-        assert cfg["epochs"] == 300
+        assert cfg["approach"] == "stgcn_ce"
+        assert cfg["wlasl_variant"] == 300
 
-    def test_pose_1000(self, cuda_hw):
-        cfg = auto_config.build_config_values("pose", 1000, "mid", cuda_hw)
-        assert cfg["d_model"] == 256
-        assert cfg["nhead"] == 8
-        assert cfg["num_layers"] == 5
-        assert cfg["epochs"] == 350
-
-    def test_video_mid_100(self, cuda_hw):
-        cfg = auto_config.build_config_values("video", 100, "mid", cuda_hw)
-        assert cfg["approach"] == "video"
-        assert cfg["batch_size"] == 8
-        assert cfg["T"] == 64
-        assert cfg["image_size"] == 224
+    def test_stgcn_proto_mid(self, cuda_hw):
+        cfg = auto_config.build_config_values("stgcn_proto", 100, "mid", cuda_hw)
+        assert cfg["approach"] == "stgcn_proto"
+        assert cfg["batch_size"] == 32
         assert cfg["fp16"] is True
+        assert cfg["n_way"] == 10
+        assert cfg["k_shot"] == 3
+        assert cfg["q_query"] == 2
+        assert cfg["num_episodes"] == 200
 
-    def test_video_low_100(self, low_cuda_hw):
-        cfg = auto_config.build_config_values("video", 100, "low", low_cuda_hw)
-        assert cfg["batch_size"] == 4
-        assert cfg["T"] == 48
-        assert cfg["image_size"] == 112
-
-    def test_fusion_cpu(self, cpu_hw):
-        cfg = auto_config.build_config_values("fusion", 100, "cpu", cpu_hw)
-        assert cfg["approach"] == "fusion"
-        assert cfg["batch_size"] == 4
-        assert cfg["T"] == 48
-        assert cfg["image_size"] == 112
+    def test_stgcn_proto_cpu(self, cpu_hw):
+        cfg = auto_config.build_config_values("stgcn_proto", 100, "cpu", cpu_hw)
+        assert cfg["batch_size"] == 8
         assert cfg["fp16"] is False
+        assert cfg["num_workers"] == 2
+
+    def test_stgcn_proto_mps(self, mps_hw):
+        cfg = auto_config.build_config_values("stgcn_proto", 100, "cpu", mps_hw)
+        assert cfg["num_workers"] == 0
 
     def test_num_workers_cuda(self, cuda_hw):
-        cfg = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
+        cfg = auto_config.build_config_values("stgcn_ce", 100, "mid", cuda_hw)
         assert cfg["num_workers"] == min(8, cuda_hw.cpu_cores)
 
     def test_num_workers_cpu(self, cpu_hw):
-        cfg = auto_config.build_config_values("pose", 100, "cpu", cpu_hw)
+        cfg = auto_config.build_config_values("stgcn_ce", 100, "cpu", cpu_hw)
         assert cfg["num_workers"] == min(2, cpu_hw.cpu_cores)
 
     def test_buffer_size_matches_t(self, cuda_hw):
-        cfg = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
+        cfg = auto_config.build_config_values("stgcn_ce", 100, "mid", cuda_hw)
         assert cfg["buffer_size"] == cfg["T"]
-
-    def test_variant_300_video_epochs(self, cuda_hw):
-        cfg = auto_config.build_config_values("video", 300, "mid", cuda_hw)
-        assert cfg["epochs"] == 300
-
-    def test_variant_2000_fusion_epochs(self, cuda_hw):
-        cfg = auto_config.build_config_values("fusion", 2000, "mid", cuda_hw)
-        assert cfg["epochs"] == 400
-        assert cfg["early_stopping_patience"] == 40
 
 
 # ---------------------------------------------------------------------------
@@ -229,36 +208,32 @@ class TestBuildConfigValues:
 
 
 class TestRenderYaml:
-    def test_valid_yaml(self, cuda_hw):
-        values = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
-        content = auto_config.render_yaml("pose", values, cuda_hw, "mid")
+    def test_stgcn_ce_valid_yaml(self, cuda_hw):
+        values = auto_config.build_config_values("stgcn_ce", 100, "mid", cuda_hw)
+        content = auto_config.render_yaml("stgcn_ce", values, cuda_hw, "mid")
         parsed = yaml.safe_load(content)
         assert isinstance(parsed, dict)
-        assert parsed["approach"] == "pose_transformer"
+        assert parsed["approach"] == "stgcn_ce"
+        assert parsed["label_smoothing"] == 0.0
+
+    def test_stgcn_proto_valid_yaml(self, cuda_hw):
+        values = auto_config.build_config_values("stgcn_proto", 100, "mid", cuda_hw)
+        content = auto_config.render_yaml("stgcn_proto", values, cuda_hw, "mid")
+        parsed = yaml.safe_load(content)
+        assert isinstance(parsed, dict)
+        assert parsed["approach"] == "stgcn_proto"
+        assert parsed["n_way"] == 10
 
     def test_header_present(self, cuda_hw):
-        values = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
-        content = auto_config.render_yaml("pose", values, cuda_hw, "mid")
+        values = auto_config.build_config_values("stgcn_ce", 100, "mid", cuda_hw)
+        content = auto_config.render_yaml("stgcn_ce", values, cuda_hw, "mid")
         assert "Auto-generated by scripts/auto_config.py" in content
         assert "NVIDIA RTX 3070" in content
         assert "Tier: mid" in content
 
-    def test_video_yaml_valid(self, cuda_hw):
-        values = auto_config.build_config_values("video", 100, "mid", cuda_hw)
-        content = auto_config.render_yaml("video", values, cuda_hw, "mid")
-        parsed = yaml.safe_load(content)
-        assert parsed["backbone"] == "r2plus1d_18"
-
-    def test_fusion_yaml_valid(self, cuda_hw):
-        values = auto_config.build_config_values("fusion", 100, "mid", cuda_hw)
-        content = auto_config.render_yaml("fusion", values, cuda_hw, "mid")
-        parsed = yaml.safe_load(content)
-        assert parsed["fusion"] == "concat"
-        assert parsed["fusion_dim"] == 256
-
     def test_fp16_false_in_cpu_yaml(self, cpu_hw):
-        values = auto_config.build_config_values("pose", 100, "cpu", cpu_hw)
-        content = auto_config.render_yaml("pose", values, cpu_hw, "cpu")
+        values = auto_config.build_config_values("stgcn_ce", 100, "cpu", cpu_hw)
+        content = auto_config.render_yaml("stgcn_ce", values, cpu_hw, "cpu")
         parsed = yaml.safe_load(content)
         assert parsed["fp16"] is False
 
@@ -288,46 +263,34 @@ class TestDetectHardware:
 
 
 class TestMainDryRun:
-    def test_dry_run_succeeds(self):
+    def test_dry_run_stgcn_ce(self):
         result = subprocess.run(
-            [sys.executable, "scripts/auto_config.py", "--approach", "pose", "--dry-run"],
+            [sys.executable, "scripts/auto_config.py", "--approach", "stgcn_ce", "--dry-run"],
             capture_output=True,
             text=True,
             cwd=str(auto_config.PROJECT_ROOT),
         )
         assert result.returncode == 0
         assert "WLASL Auto-Config" in result.stdout
-        assert "approach: pose_transformer" in result.stdout
+        assert "approach: stgcn_ce" in result.stdout
 
-    def test_dry_run_video(self):
+    def test_dry_run_stgcn_proto(self):
         result = subprocess.run(
             [sys.executable, "scripts/auto_config.py",
-             "--approach", "video", "--variant", "300", "--device", "cpu", "--dry-run"],
+             "--approach", "stgcn_proto", "--variant", "300", "--device", "cpu", "--dry-run"],
             capture_output=True,
             text=True,
             cwd=str(auto_config.PROJECT_ROOT),
         )
         assert result.returncode == 0
-        assert "approach: video" in result.stdout
+        assert "approach: stgcn_proto" in result.stdout
         assert "wlasl_variant: 300" in result.stdout
-
-    def test_dry_run_fusion(self):
-        result = subprocess.run(
-            [sys.executable, "scripts/auto_config.py",
-             "--approach", "fusion", "--dry-run"],
-            capture_output=True,
-            text=True,
-            cwd=str(auto_config.PROJECT_ROOT),
-        )
-        assert result.returncode == 0
-        assert "approach: fusion" in result.stdout
-        assert "fusion: concat" in result.stdout
 
     def test_write_and_load(self, tmp_path):
         out = tmp_path / "test.yaml"
         result = subprocess.run(
             [sys.executable, "scripts/auto_config.py",
-             "--approach", "pose", "--output", str(out)],
+             "--approach", "stgcn_ce", "--output", str(out)],
             capture_output=True,
             text=True,
             cwd=str(auto_config.PROJECT_ROOT),
@@ -335,7 +298,7 @@ class TestMainDryRun:
         assert result.returncode == 0
         assert out.exists()
         parsed = yaml.safe_load(out.read_text())
-        assert parsed["approach"] == "pose_transformer"
+        assert parsed["approach"] == "stgcn_ce"
 
 
 # ---------------------------------------------------------------------------
@@ -382,8 +345,27 @@ class TestCEConfigDefaults:
         assert cfg.mixup_alpha == 0.2
         assert cfg.head_dropout == 0.3
 
-    def test_pose_config_has_ce_fields(self, cuda_hw):
-        """Pose config values include label_smoothing and mixup_alpha."""
-        cfg = auto_config.build_config_values("pose", 100, "mid", cuda_hw)
-        assert "label_smoothing" in cfg
-        assert "mixup_alpha" in cfg
+
+# ---------------------------------------------------------------------------
+# TestValidApproaches
+# ---------------------------------------------------------------------------
+
+
+class TestValidApproaches:
+    """Verify only stgcn_ce and stgcn_proto are valid approaches."""
+
+    def test_valid_approaches_tuple(self):
+        assert auto_config.VALID_APPROACHES == ("stgcn_ce", "stgcn_proto")
+
+    def test_no_pose_video_fusion(self):
+        for invalid in ("pose", "video", "fusion"):
+            assert invalid not in auto_config.VALID_APPROACHES
+
+    def test_invalid_approach_rejected(self):
+        result = subprocess.run(
+            [sys.executable, "scripts/auto_config.py", "--approach", "pose", "--dry-run"],
+            capture_output=True,
+            text=True,
+            cwd=str(auto_config.PROJECT_ROOT),
+        )
+        assert result.returncode != 0

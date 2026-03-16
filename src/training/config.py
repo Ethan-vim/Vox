@@ -36,7 +36,7 @@ class Config:
     num_workers: int = 4
 
     # --- Model ---
-    approach: str = "stgcn_ce"  # stgcn_ce, stgcn_proto, pose_transformer, pose_bilstm, video, fusion
+    approach: str = "stgcn_ce"  # stgcn_ce or stgcn_proto
     backbone: str = "r2plus1d_18"
     num_keypoints: int = 543
     num_classes: int = 100
@@ -52,6 +52,7 @@ class Config:
 
     # --- Features ---
     use_motion: bool = True  # Concatenate velocity (frame differences) with position
+    normalize_embeddings: bool = True  # L2-norm embeddings (True for proto, False for CE)
 
     # --- Training ---
     epochs: int = 100

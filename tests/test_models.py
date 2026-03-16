@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+import torch.nn as nn
 
 from src.models.stgcn import STGCNEncoder, build_stgcn_encoder
 from src.models.prototypical import PrototypicalNetwork
@@ -63,6 +64,7 @@ class TestSTGCNClassifier:
         model = build_classifier(cfg)
         assert isinstance(model, STGCNClassifier)
         assert model.num_classes == 10
+        model.eval()
         x = torch.randn(1, T, NUM_KP * 3)
         out = model(x)
         assert out.shape == (1, 10)
@@ -83,7 +85,7 @@ class TestSTGCNClassifier:
         """Classifier model supports backprop."""
         cfg = self._make_cfg()
         model = build_classifier(cfg)
-        x = torch.randn(1, T, NUM_KP * 3)
+        x = torch.randn(B, T, NUM_KP * 3)
         out = model(x)
         loss = out.sum()
         loss.backward()
@@ -97,3 +99,57 @@ class TestSTGCNClassifier:
         x = torch.randn(B, T, NUM_KP * 6)
         out = model(x)
         assert out.shape == (B, 10)
+
+    def test_head_has_two_linear_layers(self):
+        """Enhanced head should have two Linear layers."""
+        cfg = self._make_cfg()
+        model = build_classifier(cfg)
+        linear_layers = [m for m in model.head if isinstance(m, nn.Linear)]
+        assert len(linear_layers) == 2
+
+    def test_head_has_batchnorm(self):
+        """Enhanced head should include BatchNorm1d."""
+        cfg = self._make_cfg()
+        model = build_classifier(cfg)
+        bn_layers = [m for m in model.head if isinstance(m, nn.BatchNorm1d)]
+        assert len(bn_layers) == 1
+
+
+# ---------------------------------------------------------------------------
+# STGCNEncoder normalize_embeddings
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeEmbeddings:
+    def test_normalized_by_default(self):
+        """Default encoder produces L2-normalized outputs."""
+        encoder = STGCNEncoder(num_keypoints=NUM_KP, embedding_dim=32)
+        encoder.eval()
+        x = torch.randn(B, T, NUM_KP * 3)
+        with torch.no_grad():
+            emb = encoder(x)
+        norms = emb.norm(dim=1)
+        torch.testing.assert_close(norms, torch.ones(B), atol=1e-5, rtol=1e-5)
+
+    def test_unnormalized_when_disabled(self):
+        """Encoder with normalize_embeddings=False does NOT produce unit-norm."""
+        encoder = STGCNEncoder(num_keypoints=NUM_KP, embedding_dim=32, normalize_embeddings=False)
+        encoder.eval()
+        x = torch.randn(B, T, NUM_KP * 3)
+        with torch.no_grad():
+            emb = encoder(x)
+        norms = emb.norm(dim=1)
+        # Should NOT all be 1.0
+        assert not torch.allclose(norms, torch.ones(B), atol=1e-3)
+
+    def test_build_reads_config_flag(self):
+        """build_stgcn_encoder reads normalize_embeddings from config."""
+        cfg = Config(approach="stgcn_ce", normalize_embeddings=False, wlasl_variant=10, num_classes=10)
+        encoder = build_stgcn_encoder(cfg)
+        assert encoder.normalize_embeddings is False
+
+    def test_build_defaults_to_true(self):
+        """build_stgcn_encoder defaults normalize_embeddings to True."""
+        cfg = Config(approach="stgcn_proto", wlasl_variant=10, num_classes=10)
+        encoder = build_stgcn_encoder(cfg)
+        assert encoder.normalize_embeddings is True

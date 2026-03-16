@@ -11,11 +11,12 @@ gcn_channels: [64, 128, 128]
 num_layers: 3
 dropout: 0.1
 embedding_dim: 128
+normalize_embeddings: false
 
 # Cross-entropy training
-label_smoothing: 0.1
-mixup_alpha: 0.2
-head_dropout: 0.3
+label_smoothing: 0.0
+mixup_alpha: 0.0
+head_dropout: 0.2
 
 # Training
 epochs: 200

@@ -214,12 +214,14 @@ class STGCNEncoder(nn.Module):
         channels: list[int] | None = None,
         dropout: float = 0.1,
         use_motion: bool = False,
+        normalize_embeddings: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__()
         self.num_keypoints = num_keypoints
         self.use_motion = use_motion
         self.embedding_dim = embedding_dim
+        self.normalize_embeddings = normalize_embeddings
 
         in_channels = 6 if use_motion else 3
         if channels is None:
@@ -239,7 +241,7 @@ class STGCNEncoder(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Encode keypoint sequence to L2-normalized embedding.
+        """Encode keypoint sequence to embedding.
 
         Parameters
         ----------
@@ -249,7 +251,9 @@ class STGCNEncoder(nn.Module):
         Returns
         -------
         torch.Tensor
-            Shape ``(B, embedding_dim)``, L2-normalized.
+            Shape ``(B, embedding_dim)``.  L2-normalized when
+            ``normalize_embeddings`` is True (default, required for
+            prototypical distance-based classification).
         """
         B, T, _ = x.shape
         C = 6 if self.use_motion else 3
@@ -266,7 +270,9 @@ class STGCNEncoder(nn.Module):
 
         merged = torch.cat([body_feat, lhand_feat, rhand_feat], dim=1)
         embedding = self.projection(merged)
-        return F.normalize(embedding, dim=1)
+        if self.normalize_embeddings:
+            return F.normalize(embedding, dim=1)
+        return embedding
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +288,7 @@ def build_stgcn_encoder(cfg: Any) -> STGCNEncoder:
         channels=getattr(cfg, "gcn_channels", None),
         dropout=getattr(cfg, "dropout", 0.1),
         use_motion=getattr(cfg, "use_motion", False),
+        normalize_embeddings=getattr(cfg, "normalize_embeddings", True),
     )
     param_count = sum(p.numel() for p in encoder.parameters() if p.requires_grad)
     logger.info("Built STGCNEncoder with %.2fM parameters", param_count / 1e6)
