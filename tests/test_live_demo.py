@@ -1,9 +1,11 @@
-"""Tests for src.inference.live_demo — FrameBuffer, prediction smoothing."""
+"""Tests for src.inference.live_demo — FrameBuffer, MotionDetector, prediction smoothing."""
+
+from dataclasses import dataclass
 
 import numpy as np
 import pytest
 
-from src.inference.live_demo import FrameBuffer, LivePredictor
+from src.inference.live_demo import FrameBuffer, LivePredictor, MotionDetector
 
 NUM_KP = 543
 
@@ -101,3 +103,108 @@ class TestSmoothPredictions:
         result = LivePredictor.smooth_predictions(preds, mode="avg")
         assert result["gloss"] == "test"
         assert abs(result["confidence"] - 0.95) < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# MotionDetector
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _MockCfg:
+    """Minimal config for MotionDetector tests."""
+    motion_start_threshold: float = 0.005
+    motion_end_threshold: float = 0.003
+    motion_settle_frames: int = 8
+    max_sign_duration: int = 90
+    static_sign_timeout: int = 45
+
+
+def _still_frame():
+    """Return a keypoint frame with no motion (zeros)."""
+    return np.zeros((NUM_KP, 3), dtype=np.float32)
+
+
+def _moving_frame(magnitude: float = 0.05):
+    """Return a keypoint frame with hand keypoints shifted by magnitude."""
+    kps = np.zeros((NUM_KP, 3), dtype=np.float32)
+    # Set hand keypoints (33-74) to a non-zero value
+    kps[33:75, :] = magnitude
+    return kps
+
+
+class TestMotionDetector:
+    def test_initial_state_is_idle(self):
+        md = MotionDetector(_MockCfg())
+        assert md.state == "IDLE"
+
+    def test_idle_duration_increments(self):
+        md = MotionDetector(_MockCfg())
+        frame = _still_frame()
+        for _ in range(10):
+            md.update(frame)
+        assert md.idle_duration >= 9  # first frame sets prev, subsequent ones count
+
+    def test_detects_sign_start(self):
+        md = MotionDetector(_MockCfg())
+        # First frame: set baseline
+        md.update(_still_frame())
+        # Second frame: large hand displacement triggers SIGNING
+        md.update(_moving_frame(0.05))
+        assert md.state == "SIGNING"
+
+    def test_detects_sign_end(self):
+        cfg = _MockCfg(motion_settle_frames=3)
+        md = MotionDetector(cfg)
+        # Start signing
+        md.update(_still_frame())
+        md.update(_moving_frame(0.05))
+        assert md.state == "SIGNING"
+
+        # Settle: send identical still frames (zero velocity)
+        still = _still_frame()
+        for _ in range(4):
+            md.update(still)
+        assert md.state == "COMPLETED"
+
+    def test_max_sign_duration_forces_completed(self):
+        cfg = _MockCfg(max_sign_duration=5)
+        md = MotionDetector(cfg)
+        # Start signing
+        md.update(_still_frame())
+        md.update(_moving_frame(0.05))
+        assert md.state == "SIGNING"
+
+        # Keep signing for max_duration frames with continuous motion
+        for i in range(5):
+            md.update(_moving_frame(0.05 + i * 0.01))
+        assert md.state == "COMPLETED"
+
+    def test_reset_returns_to_idle(self):
+        md = MotionDetector(_MockCfg())
+        md.update(_still_frame())
+        md.update(_moving_frame(0.05))
+        assert md.state == "SIGNING"
+        md.reset()
+        assert md.state == "IDLE"
+        assert md.idle_duration == 0
+
+    def test_velocity_uses_hand_keypoints(self):
+        """Only hand keypoints (33-74) should contribute to velocity."""
+        md = MotionDetector(_MockCfg())
+        # First frame: all zeros
+        md.update(_still_frame())
+
+        # Second frame: only body keypoints (0-32) move, hands stay still
+        frame = _still_frame()
+        frame[:33, :] = 0.1  # body moves
+        state = md.update(frame)
+        # Should remain IDLE since hands didn't move
+        assert state == "IDLE"
+
+    def test_stays_idle_with_no_motion(self):
+        md = MotionDetector(_MockCfg())
+        still = _still_frame()
+        for _ in range(20):
+            md.update(still)
+        assert md.state == "IDLE"

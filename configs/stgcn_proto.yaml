@@ -47,6 +47,16 @@ smoothing_window: 5
 buffer_size: 64
 fps_display: true
 
+# Sign detection
+min_buffer_frames: 30
+prediction_cooldown: 1.0
+motion_start_threshold: 0.005
+motion_end_threshold: 0.003
+motion_settle_frames: 8
+max_sign_duration: 90
+static_sign_timeout: 45
+inference_poll_interval: 0.1
+
 # Paths
 data_dir: data
 output_dir: outputs

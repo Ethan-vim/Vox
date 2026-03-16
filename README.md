@@ -1,6 +1,17 @@
-# Live American Sign Language Recognition using WLASL
+<div align="center">
+  <h1>Vox</h1>
+  <p><strong>Real-time American Sign Language recognition -- bridging the communication gap between deaf and hearing communities.</strong></p>
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"/></a>
+    <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"/></a>
+  </p>
+</div>
 
-A real-time ASL word-level recognition system that captures live webcam video, processes hand/body movements frame-by-frame using MediaPipe, and predicts the signed word using deep learning models trained on the [WLASL dataset](https://github.com/dxli94/WLASL).
+---
+
+**Over 500,000 deaf and hard-of-hearing people in the US use American Sign Language as their primary language, yet most hearing people cannot understand it.** This project bridges that gap. Point a webcam at someone signing and get real-time word-level predictions -- no special hardware, no cloud dependency, just a laptop and a camera. Built on the [WLASL dataset](https://github.com/dxli94/WLASL) with spatiotemporal graph convolutions (ST-GCN) that read hand and body skeleton movements frame-by-frame, it runs locally on CPU, CUDA, or Apple Silicon.
+
+---
 
 ## Table of Contents
 
@@ -558,7 +569,11 @@ python -m src.inference.live_demo `
 - `q` — quit
 - `s` — save the current prediction to a log file
 
-The demo runs three threads: a capture thread reads webcam frames continuously, an inference thread runs the model every 0.5 s on a rolling buffer of T frames, and the main thread renders the overlay. Predictions are smoothed over the last 5 inference windows and only displayed when confidence exceeds the configured threshold (default: 0.6).
+The demo runs three threads: a capture thread reads webcam frames continuously, an inference thread runs the model when a sign is detected as complete, and the main thread renders the overlay. Predictions are smoothed over the last 5 inference windows and only displayed when confidence exceeds the configured threshold (default: 0.6).
+
+**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference). Predictions only fire after sign completion, when the buffer is full, or after a static sign timeout (for held handshapes like fingerspelled letters). After a confident prediction, the buffer is cleared and a cooldown period prevents re-predicting the same sign.
+
+**Confidence scaling:** Predictions from partially-filled buffers have their confidence scaled by the buffer fill ratio (`real_frames / T`), so incomplete signs naturally fall below the confidence threshold.
 
 ---
 
@@ -883,6 +898,20 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `smoothing_window`     | Number of inference windows to smooth predictions over | `5`     |
 | `buffer_size`          | Rolling frame buffer size for live demo                | `64`    |
 | `fps_display`          | Show FPS counter on live demo overlay                  | `true`  |
+
+**Sign Detection (Live Demo):**
+
+
+| Parameter                 | Description                                                    | Default |
+| ------------------------- | -------------------------------------------------------------- | ------- |
+| `min_buffer_frames`       | Minimum real frames before prediction (~1s at 30fps)           | `30`    |
+| `prediction_cooldown`     | Seconds to wait after a confident prediction before next       | `1.0`   |
+| `motion_start_threshold`  | Hand velocity threshold to detect sign start                   | `0.005` |
+| `motion_end_threshold`    | Hand velocity threshold to detect sign end                     | `0.003` |
+| `motion_settle_frames`    | Consecutive low-velocity frames to confirm sign end            | `8`     |
+| `max_sign_duration`       | Max frames before forcing sign completion (~3s at 30fps)       | `90`    |
+| `static_sign_timeout`     | Idle frames with buffer data before allowing static prediction | `45`    |
+| `inference_poll_interval` | Seconds between inference loop state checks                    | `0.1`   |
 
 
 **Logging:**
