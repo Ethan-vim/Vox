@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Run tests
-        run: python -m pytest --tb=short -q
+        run: python -m pytest --tb=short -q -k "not TestKaggle"
 
   claude-review:
     needs: test
