@@ -28,7 +28,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.data.augment import get_val_transforms
+from src.data.augment import KeypointHorizontalFlip, get_val_transforms
 from src.data.preprocess import (
     NUM_KEYPOINTS,
     _import_mediapipe_drawing,
@@ -147,6 +147,17 @@ class MotionDetector:
             Mean L2 displacement across the 42 hand keypoints.
         """
         hand_kps = keypoints[self.HAND_START:self.HAND_END]
+
+        # Skip frames where hands weren't detected (all zeros) to avoid
+        # false velocity spikes that incorrectly trigger SIGNING state.
+        hand_norm = np.linalg.norm(hand_kps, axis=1).sum()
+        if hand_norm < 1e-6:
+            # Hands not detected — invalidate reference so the first valid
+            # frame after a gap re-initializes instead of computing a large
+            # displacement from the stale reference.
+            self._prev_hand_kps = None
+            return 0.0
+
         if self._prev_hand_kps is None:
             self._prev_hand_kps = hand_kps.copy()
             return 0.0
@@ -250,6 +261,8 @@ class LivePredictor:
 
         self._use_classify = hasattr(self.model, 'classify')
         self.transform = get_val_transforms(T=cfg.T)
+        self._use_tta = getattr(cfg, "use_tta", False)
+        self._hflip = KeypointHorizontalFlip(p=1.0, centered=True)
 
         # MediaPipe — uses shared helper that handles Windows/Python 3.12 fallback
         self._mp_holistic = _import_mediapipe_holistic()
@@ -380,6 +393,27 @@ class LivePredictor:
                 logits = self.model.classify(tensor)
             else:
                 logits = self.model(tensor)
+
+            # Test-Time Augmentation: average logits with horizontal flip
+            if self._use_tta and keypoints.ndim == 3:
+                C_feat = keypoints.shape[2]
+                if C_feat == 6:
+                    # Split position/velocity, flip each separately (match evaluate.py)
+                    pos = keypoints[:, :, :3].copy()
+                    vel = keypoints[:, :, 3:].copy()
+                    pos_flip = self._hflip(pos)
+                    vel_flip = self._hflip(vel)
+                    kps_flipped = np.concatenate([pos_flip, vel_flip], axis=-1)
+                else:
+                    kps_flipped = self._hflip(keypoints.copy())
+                flipped_flat = kps_flipped.reshape(T, -1)
+                flipped_tensor = torch.from_numpy(flipped_flat).float().unsqueeze(0).to(self.device)
+                if self._use_classify:
+                    logits_flip = self.model.classify(flipped_tensor)
+                else:
+                    logits_flip = self.model(flipped_tensor)
+                logits = (logits + logits_flip) / 2.0
+
             probs = F.softmax(logits, dim=1).squeeze(0)
 
         top5_probs, top5_indices = probs.topk(5)
@@ -707,9 +741,14 @@ def run_demo(
     # FPS tracking
     frame_times: collections.deque[float] = collections.deque(maxlen=30)
 
+    # Prediction display expiry
+    prediction_time: float = 0.0
+    prediction_display_timeout: float = 3.0  # seconds before clearing stale prediction
+
     # Inference thread — motion-aware with cooldown
     def inference_loop() -> None:
         nonlocal current_prediction, current_confidence, current_top5, recent_predictions
+        nonlocal prediction_time
         cooldown_until = 0.0
         poll_interval = getattr(cfg, "inference_poll_interval", 0.1)
 
@@ -734,7 +773,8 @@ def run_demo(
             should_infer = False
             if state == "COMPLETED":
                 should_infer = True
-            elif buf_len >= cfg.buffer_size:
+            elif state == "SIGNING" and buf_len >= cfg.buffer_size:
+                # Long sign that filled the buffer — force inference
                 should_infer = True
             elif state == "IDLE" and buf_len >= getattr(cfg, "min_buffer_frames", 30):
                 if idle_dur >= getattr(cfg, "static_sign_timeout", 45):
@@ -757,6 +797,7 @@ def run_demo(
                     current_prediction = smoothed
                     current_confidence = smoothed["confidence"]
                     current_top5 = smoothed.get("top5")
+                    prediction_time = now
 
                     # Post-prediction cooldown
                     buffer.clear()
@@ -765,14 +806,18 @@ def run_demo(
                     recent_predictions.clear()
                     cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
                 else:
-                    # Below confidence threshold -- show the best guess
-                    # but keep the rolling buffer so new frames improve it.
-                    # Short cooldown prevents hammering inference on same data.
+                    # Below confidence threshold — clear and wait for next sign.
+                    # Re-inferring on the same stale data won't improve results.
                     if smoothed is not None:
                         current_prediction = smoothed
                         current_confidence = smoothed["confidence"]
                         current_top5 = smoothed.get("top5")
-                    cooldown_until = now + poll_interval * 5  # ~0.5s pause
+                        prediction_time = now
+                    buffer.clear()
+                    with motion_lock:
+                        motion_detector.reset()
+                    recent_predictions.clear()
+                    cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
 
     inference_thread = threading.Thread(target=inference_loop, daemon=True)
     inference_thread.start()
@@ -808,6 +853,13 @@ def run_demo(
 
             # Get current prediction (thread-safe read)
             with inference_lock:
+                # Expire stale predictions so display reverts to "Waiting..."
+                if (current_prediction is not None
+                        and prediction_time > 0
+                        and (time.time() - prediction_time) > prediction_display_timeout):
+                    current_prediction = None
+                    current_confidence = 0.0
+                    current_top5 = None
                 pred_copy = current_prediction
                 conf_copy = current_confidence
                 top5_copy = current_top5

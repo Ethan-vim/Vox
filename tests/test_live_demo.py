@@ -121,8 +121,16 @@ class _MockCfg:
 
 
 def _still_frame():
-    """Return a keypoint frame with no motion (zeros)."""
-    return np.zeros((NUM_KP, 3), dtype=np.float32)
+    """Return a keypoint frame with hands present but no motion.
+
+    Hand keypoints are non-zero so the motion detector treats them
+    as valid detections (zero hand keypoints are skipped as detection
+    failures).
+    """
+    kps = np.zeros((NUM_KP, 3), dtype=np.float32)
+    # Set hand keypoints to a small constant so they pass the zero check
+    kps[33:75, :] = 0.001
+    return kps
 
 
 def _moving_frame(magnitude: float = 0.05):
