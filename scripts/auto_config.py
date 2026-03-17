@@ -188,7 +188,7 @@ def build_config_values(
         cfg = {
             "approach": "stgcn_ce",
             "wlasl_variant": variant,
-            "num_keypoints": 543,
+            "num_keypoints": 75,
             "T": 64,
             "use_motion": True,
             "use_augmentation": True,
@@ -198,8 +198,12 @@ def build_config_values(
             "dropout": 0.1,
             "embedding_dim": 128,
             "normalize_embeddings": False,
-            "label_smoothing": 0.0,
-            "mixup_alpha": 0.0,
+            "use_attention_pool": False,
+            "drop_path_rate": 0.0,
+            "use_cross_attention": False,
+            "aux_loss_weight": 0.0,
+            "label_smoothing": 0.1,
+            "mixup_alpha": 0.2,
             "head_dropout": 0.2,
             "class_weighted_loss": True,
             "num_workers": 4,
@@ -211,14 +215,15 @@ def build_config_values(
             "fp16": False,
             "weighted_sampling": True,
             "early_stopping_patience": 30,
-            "scheduler": "cosine",
+            "scheduler": "onecycle",
             "epochs": 200,
+            "use_tta": True,
         }
     else:  # stgcn_proto
         cfg = {
             "approach": "stgcn_proto",
             "wlasl_variant": variant,
-            "num_keypoints": 543,
+            "num_keypoints": 75,
             "T": 64,
             "use_motion": True,
             "d_model": 128,
@@ -226,6 +231,8 @@ def build_config_values(
             "num_layers": 3,
             "dropout": 0.1,
             "normalize_embeddings": True,
+            "use_attention_pool": False,
+            "drop_path_rate": 0.0,
             "n_way": 10,
             "k_shot": 3,
             "q_query": 2,
@@ -241,7 +248,7 @@ def build_config_values(
             "early_stopping_patience": 30,
             "scheduler": "cosine",
             "epochs": 200,
-            "use_tta": False,
+            "use_tta": True,
         }
 
     # --- Tier-specific overrides (hardware-dependent) ---
@@ -357,6 +364,10 @@ num_layers: {values['num_layers']}
 dropout: {values['dropout']}
 embedding_dim: {values['embedding_dim']}
 normalize_embeddings: {_bool(values['normalize_embeddings'])}
+use_attention_pool: {_bool(values['use_attention_pool'])}
+drop_path_rate: {values['drop_path_rate']}
+use_cross_attention: {_bool(values['use_cross_attention'])}
+aux_loss_weight: {values['aux_loss_weight']}
 
 # Cross-entropy training
 label_smoothing: {values['label_smoothing']}
@@ -376,6 +387,9 @@ weighted_sampling: {_bool(values['weighted_sampling'])}
 early_stopping_patience: {values['early_stopping_patience']}
 scheduler: {values['scheduler']}
 num_workers: {values['num_workers']}
+
+# Evaluation
+use_tta: {_bool(values['use_tta'])}
 
 # Inference
 confidence_threshold: {values['confidence_threshold']}
@@ -414,6 +428,8 @@ gcn_channels: {gcn_str}
 num_layers: {values['num_layers']}
 dropout: {values['dropout']}
 normalize_embeddings: {_bool(values['normalize_embeddings'])}
+use_attention_pool: {_bool(values['use_attention_pool'])}
+drop_path_rate: {values['drop_path_rate']}
 
 # Prototypical training
 n_way: {values['n_way']}
