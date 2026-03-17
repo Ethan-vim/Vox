@@ -342,7 +342,7 @@ class LivePredictor:
         dict or None
             Prediction result or None if buffer is too short.
         """
-        keypoints = buffer.get_all()  # (N, 543, 3)
+        keypoints = buffer.get_all()  # (N, NUM_KEYPOINTS, 3)
 
         min_frames = getattr(self.cfg, "min_buffer_frames", 30)
         if keypoints.shape[0] < min_frames:
@@ -351,12 +351,30 @@ class LivePredictor:
         # Normalize
         keypoints = normalize_keypoints(keypoints)
 
+        # Drop face landmarks: keep only pose (33) + left hand (21) + right hand (21) = 75
+        keypoints = keypoints[:, :75, :]
+
         # Pad/crop to T frames
         T = self.cfg.T
         N = keypoints.shape[0]  # real frame count before padding
         if N < T:
-            pad = np.tile(keypoints[-1:], (T - N, 1, 1))
-            keypoints = np.concatenate([keypoints, pad], axis=0)
+            # Reflection padding (match dataset.py behavior)
+            pad_count = T - N
+            reflect_indices = []
+            idx = N - 2
+            direction = -1
+            for _ in range(pad_count):
+                idx = max(0, min(N - 1, idx))
+                reflect_indices.append(idx)
+                idx += direction
+                if idx < 0:
+                    idx = 1
+                    direction = 1
+                elif idx >= N:
+                    idx = N - 2
+                    direction = -1
+            padding = keypoints[reflect_indices]
+            keypoints = np.concatenate([keypoints, padding], axis=0)
         elif N > T:
             indices = np.linspace(0, N - 1, T, dtype=np.int64)
             keypoints = keypoints[indices]
@@ -365,10 +383,10 @@ class LivePredictor:
         if getattr(self.cfg, "use_motion", False):
             velocity = np.zeros_like(keypoints)
             velocity[1:] = keypoints[1:] - keypoints[:-1]
-            keypoints = np.concatenate([keypoints, velocity], axis=-1)  # (T, 543, 6)
+            keypoints = np.concatenate([keypoints, velocity], axis=-1)  # (T, 75, 6)
 
         # Flatten and convert to tensor
-        keypoints_flat = keypoints.reshape(T, -1)  # (T, 543*C)
+        keypoints_flat = keypoints.reshape(T, -1)  # (T, 75*C)
         tensor = torch.from_numpy(keypoints_flat).float().unsqueeze(0).to(self.device)
 
         with torch.no_grad():
@@ -765,9 +783,16 @@ def run_demo(
                     recent_predictions.clear()
                     cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
                 else:
-                    current_prediction = None
-                    current_confidence = 0.0
-                    current_top5 = None
+                    # Below confidence threshold -- show the best guess
+                    # but still reset to avoid stuck 64/64 loop
+                    if smoothed is not None:
+                        current_prediction = smoothed
+                        current_confidence = smoothed["confidence"]
+                        current_top5 = smoothed.get("top5")
+                    buffer.clear()
+                    with motion_lock:
+                        motion_detector.reset()
+                    recent_predictions.clear()
 
     inference_thread = threading.Thread(target=inference_loop, daemon=True)
     inference_thread.start()
