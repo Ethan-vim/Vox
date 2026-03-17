@@ -87,7 +87,7 @@ class Config:
 
     # --- Inference ---
     confidence_threshold: float = 0.6
-    smoothing_window: int = 5
+    smoothing_window: int = 1
     buffer_size: int = 64
     fps_display: bool = True
 

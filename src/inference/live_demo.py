@@ -28,6 +28,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from src.data.augment import get_val_transforms
 from src.data.preprocess import (
     NUM_KEYPOINTS,
     _import_mediapipe_drawing,
@@ -248,6 +249,7 @@ class LivePredictor:
             self._load_prototypes(cfg)
 
         self._use_classify = hasattr(self.model, 'classify')
+        self.transform = get_val_transforms(T=cfg.T)
 
         # MediaPipe — uses shared helper that handles Windows/Python 3.12 fallback
         self._mp_holistic = _import_mediapipe_holistic()
@@ -256,9 +258,9 @@ class LivePredictor:
         self._mp_drawing_styles = styles_mod
         self.holistic = self._mp_holistic.Holistic(
             static_image_mode=False,
-            model_complexity=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
+            model_complexity=2,
+            min_detection_confidence=0.3,
+            min_tracking_confidence=0.3,
         )
 
         logger.info("LivePredictor initialized (device=%s)", self.device)
@@ -354,30 +356,13 @@ class LivePredictor:
         # Drop face landmarks: keep only pose (33) + left hand (21) + right hand (21) = 75
         keypoints = keypoints[:, :75, :]
 
-        # Pad/crop to T frames
-        T = self.cfg.T
-        N = keypoints.shape[0]  # real frame count before padding
-        if N < T:
-            # Reflection padding (match dataset.py behavior)
-            pad_count = T - N
-            reflect_indices = []
-            idx = N - 2
-            direction = -1
-            for _ in range(pad_count):
-                idx = max(0, min(N - 1, idx))
-                reflect_indices.append(idx)
-                idx += direction
-                if idx < 0:
-                    idx = 1
-                    direction = 1
-                elif idx >= N:
-                    idx = N - 2
-                    direction = -1
-            padding = keypoints[reflect_indices]
-            keypoints = np.concatenate([keypoints, padding], axis=0)
-        elif N > T:
-            indices = np.linspace(0, N - 1, T, dtype=np.int64)
-            keypoints = keypoints[indices]
+        # Apply val transforms (temporal crop/pad to T frames) — matches eval pipeline
+        keypoints = self.transform(keypoints)
+
+        # Ensure 3D: (T, K, 3)
+        if keypoints.ndim == 2:
+            T_actual = keypoints.shape[0]
+            keypoints = keypoints.reshape(T_actual, -1, 3)
 
         # Compute velocity if use_motion is enabled
         if getattr(self.cfg, "use_motion", False):
@@ -386,6 +371,7 @@ class LivePredictor:
             keypoints = np.concatenate([keypoints, velocity], axis=-1)  # (T, 75, 6)
 
         # Flatten and convert to tensor
+        T = keypoints.shape[0]
         keypoints_flat = keypoints.reshape(T, -1)  # (T, 75*C)
         tensor = torch.from_numpy(keypoints_flat).float().unsqueeze(0).to(self.device)
 
@@ -400,16 +386,13 @@ class LivePredictor:
         top5_probs = top5_probs.cpu().numpy()
         top5_indices = top5_indices.cpu().numpy()
 
-        # Scale confidence by buffer fill ratio to penalize partial sequences
-        buffer_fill_ratio = min(1.0, N / T)
-
         pred_idx = int(top5_indices[0])
-        confidence = float(top5_probs[0]) * buffer_fill_ratio
+        confidence = float(top5_probs[0])
         gloss = self.class_names[pred_idx] if pred_idx < len(self.class_names) else str(pred_idx)
         top5 = [
             (
                 self.class_names[int(i)] if int(i) < len(self.class_names) else str(i),
-                float(p) * buffer_fill_ratio,
+                float(p),
             )
             for i, p in zip(top5_indices, top5_probs)
         ]
@@ -419,7 +402,6 @@ class LivePredictor:
             "confidence": confidence,
             "label_idx": pred_idx,
             "top5": top5,
-            "buffer_fill_ratio": buffer_fill_ratio,
         }
 
     @staticmethod
