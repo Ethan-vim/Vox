@@ -494,6 +494,9 @@ python -m src.training.train --config configs/stgcn_ce.yaml
 
 # ST-GCN + Prototypical Network (alternative — for few-shot scenarios only)
 python -m src.training.train --config configs/stgcn_proto.yaml
+
+# Force a specific device (auto-detects by default: CUDA > MPS > CPU)
+python -m src.training.train --config configs/stgcn_ce.yaml --device cpu
 ```
 
 Training checkpoints are saved to `checkpoints/` and logs to `logs/`.

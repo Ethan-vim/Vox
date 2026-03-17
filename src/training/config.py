@@ -44,7 +44,6 @@ class Config:
     nhead: int = 4
     num_layers: int = 3
     dropout: float = 0.5
-    pretrained: bool = True
 
     # Fusion-specific
     fusion: str = "concat"  # concat or attention
@@ -104,16 +103,8 @@ class Config:
     def __post_init__(self) -> None:
         """Derive num_classes and model architecture from wlasl_variant.
 
-        Smaller subsets scale down transformer size AND dropout to keep the
-        regularisation proportional to model capacity.  Without this, a tiny
-        model (d_model=64, 1 layer) paired with high dropout (0.5) has so much
-        noise in the gradient that the loss never meaningfully decreases.
-
-        Architecture auto-scaling only applies to pose-based approaches
-        (pose_transformer, pose_bilstm) and the pose sub-model in fusion.
-        Video classifiers use pretrained 3D CNN backbones with their own
-        optimal dropout (typically 0.3-0.5), so we leave dropout untouched
-        for the ``video`` approach.
+        Smaller subsets scale down model size AND dropout to keep the
+        regularisation proportional to model capacity.
         """
         variant_to_classes = {100: 100, 300: 300, 1000: 1000, 2000: 2000}
         if self.wlasl_variant in variant_to_classes:
@@ -130,11 +121,7 @@ class Config:
             self.d_model = arch["d_model"]
             self.nhead = arch["nhead"]
             self.num_layers = arch["num_layers"]
-            # Only override dropout for pose-based approaches.  Video
-            # classifiers use pretrained backbones that need their own
-            # dropout (typically 0.3-0.5 for 3D CNNs).
-            if self.approach != "video":
-                self.dropout = arch["dropout"]
+            self.dropout = arch["dropout"]
 
 
 def load_config(path: str | Path) -> Config:

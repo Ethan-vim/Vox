@@ -256,7 +256,7 @@ Input: (batch, T, input_dim)     input_dim = 543*3 or 543*6 (with motion)
     └─────────┬───────────┘
               v
     ┌─────────────────────────────┐
-    │  Classification head (CE)   │  Linear→BN→ReLU→Dropout→Linear
+    │  Classification head (CE)   │  Linear→LayerNorm→ReLU→Dropout→Linear
     │  OR Prototypical distance   │  Distance to class prototypes
     └─────────┬───────────────────┘
               v
@@ -276,7 +276,7 @@ configs/stgcn_proto.yaml                                        │
                                                                         live_demo.py
                                                                         export_onnx.py
 
-Config.__post_init__() auto-derives (dropout scales with model size, skipped for video approach):
+Config.__post_init__() auto-derives (scales with variant size):
     wlasl_variant: 100  ──>  num_classes: 100,  d_model: 128, nhead: 4, num_layers: 2, dropout: 0.1
     wlasl_variant: 300  ──>  num_classes: 300,  d_model: 192, nhead: 6, num_layers: 4, dropout: 0.3
     wlasl_variant: 1000 ──>  num_classes: 1000, d_model: 256, nhead: 8, num_layers: 5, dropout: 0.4
@@ -319,7 +319,7 @@ All tests use `conftest.py` shared fixtures (tmp datasets, keypoint generators) 
 | `python scripts/check_mediapipe.py` | `scripts/check_mediapipe.py` | Verify MediaPipe installation |
 | `python scripts/auto_config.py` | `scripts/auto_config.py` | Auto-detect hardware and generate optimized config |
 | `python -m src.data.preprocess` | `src/data/preprocess.py` | Extract keypoints from videos, create splits |
-| `python -m src.training.train` | `src/training/train.py` | Train a model |
+| `python -m src.training.train --config ... [--device cpu\|cuda\|mps]` | `src/training/train.py` | Train a model (auto-detects device, or force with --device) |
 | `python -m src.training.evaluate` | `src/training/evaluate.py` | Evaluate a trained model |
 | `python -m src.inference.predict` | `src/inference/predict.py` | Predict on a single video |
 | `python -m src.inference.live_demo` | `src/inference/live_demo.py` | Run real-time webcam demo |
