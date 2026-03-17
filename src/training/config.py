@@ -44,6 +44,10 @@ class Config:
     nhead: int = 4
     num_layers: int = 3
     dropout: float = 0.5
+    use_attention_pool: bool = False  # Use attention-weighted temporal pooling
+    drop_path_rate: float = 0.0  # Stochastic depth drop rate (0 = disabled)
+    use_cross_attention: bool = False  # Cross-branch attention fusion
+    aux_loss_weight: float = 0.0  # Auxiliary branch loss weight (0 = disabled)
 
     # Fusion-specific
     fusion: str = "concat"  # concat or attention

@@ -115,8 +115,8 @@ Shows which project files each module imports from (`src.*` imports only).
 | Module | Key Classes | Build Function | Approaches |
 |--------|-------------|----------------|------------|
 | `__init__.py` | — | `build_model(cfg)` | Unified factory dispatching on `cfg.approach` |
-| `stgcn.py` | `STGCNEncoder` | `build_stgcn_encoder(cfg)` | ST-GCN encoder with body/hand graph branches, conditional L2 normalization |
-| `classifier.py` | `STGCNClassifier` | `build_classifier(cfg)` | ST-GCN encoder + two-layer head (stgcn_ce) |
+| `stgcn.py` | `STGCNEncoder`, `DropPath`, `AttentionPool`, `CrossBranchAttention` | `build_stgcn_encoder(cfg)`, `forward_with_branches()` | ST-GCN encoder with body/hand graph branches, dilated TCN, joint importance weighting, optional attention pooling, stochastic depth, and cross-branch attention |
+| `classifier.py` | `STGCNClassifier` | `build_classifier(cfg)`, `forward_with_aux()` | ST-GCN encoder + two-layer head + optional auxiliary branch heads (stgcn_ce) |
 | `prototypical.py` | `PrototypicalNetwork` | — | Prototypical network wrapper for few-shot (stgcn_proto) |
 
 The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.approach` to the correct model builder. All `build_*_model()` functions take a `Config` object and return an `nn.Module`.
@@ -127,7 +127,7 @@ The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.appro
 |--------|---------------|--------------|
 | `config.py` | `Config` (dataclass), `load_config()`, `save_config()` | (none — leaf dependency) |
 | `train.py` | `main()` — CLI dispatcher | `config`, `train_ce`, `train_prototypical` |
-| `train_ce.py` | `train_ce()` — standard cross-entropy training loop with label smoothing + mixup | `config`, `augment`, `dataset`, `models` |
+| `train_ce.py` | `train_one_epoch()`, `validate()`, `main()` — cross-entropy training with label smoothing, mixup, OneCycleLR/cosine scheduler, and optional auxiliary branch losses | `config`, `augment`, `dataset`, `models` |
 | `train_prototypical.py` | `train_prototypical()` — episodic prototypical training loop | `config`, `augment`, `dataset`, `episode_sampler`, `models` |
 | `evaluate.py` | `compute_metrics()`, `plot_confusion_matrix()`, `find_hard_negatives()`, `evaluate_latency()`, `main()` | `config`, `augment`, `dataset`, `models` |
 
@@ -168,8 +168,9 @@ data/processed/*.npy + data/splits/WLASL{N}/train.csv
   │  WLASLKeypointDataset           │
   │    __getitem__():               │
   │      load .npy                  │
-  │      pad/crop to T frames      │
-  │      compute velocity (motion)  │  ──> (T, 543*6) when use_motion=True
+  │      slice to 75 keypoints     │  (drop face landmarks)
+  │      pad/crop to T frames      │  (reflection padding)
+  │      compute velocity (motion)  │  ──> (T, 75*6) when use_motion=True
   │      apply augmentations        │  (incl. KeypointYawRotation for 3D viewpoint simulation)
   │
   │      flatten to (T, input_dim)  │
@@ -227,7 +228,7 @@ ONNX Export (export_onnx.py):
 ### Model Architecture Flow (ST-GCN)
 
 ```
-Input: (batch, T, input_dim)     input_dim = 543*3 or 543*6 (with motion)
+Input: (batch, T, input_dim)     input_dim = 75*3 or 75*6 (with motion)
               │
               v
     ┌──────────────────────────┐
@@ -238,17 +239,22 @@ Input: (batch, T, input_dim)     input_dim = 543*3 or 543*6 (with motion)
     v         v         v
   ┌──────┐ ┌──────┐ ┌──────┐
   │ Body │ │ Left │ │Right │     Separate graph convolution branches
-  │ GCN  │ │ Hand │ │ Hand │     with adjacency matrices
+  │ GCN  │ │ Hand │ │ Hand │     with dilated TCN, DropPath, joint importance
   │(33kp)│ │(21kp)│ │(21kp)│
   └──┬───┘ └──┬───┘ └──┬───┘
      └─────────┼─────────┘
                v
     ┌─────────────────────┐
-    │  Concat + Project   │  Fuse branch outputs
+    │  Avg Pool or        │  Pool over time+joints per branch
+    │  AttentionPool      │  (optional attention-weighted temporal pooling)
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
-    │  Global Avg Pool    │  (T, d_model) -> (d_model,)
+    │  CrossBranchAttn?   │  Optional cross-branch attention fusion
+    └─────────┬───────────┘
+              v
+    ┌─────────────────────┐
+    │  Concat + Project   │  Fuse branch outputs
     └─────────┬───────────┘
               v
     ┌─────────────────────┐
@@ -298,7 +304,7 @@ Each test file maps to one or more source modules:
 | `test_evaluate.py` | `src/training/evaluate.py` — metrics, TTA, hard negatives, latency |
 | `test_export_onnx.py` | `src/inference/export_onnx.py` — ONNX export and verification |
 | `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, MotionDetector, prediction smoothing |
-| `test_models.py` | `src/models/` — STGCNEncoder, STGCNClassifier, PrototypicalNetwork, normalize_embeddings |
+| `test_models.py` | `src/models/` — STGCNEncoder, STGCNClassifier, PrototypicalNetwork, normalize_embeddings, DropPath, AttentionPool, CrossBranchAttention, auxiliary heads, 75-keypoint models |
 | `test_predict.py` | `src/inference/predict.py` — SignPredictor inference paths |
 | `test_preprocess.py` | `src/data/preprocess.py` — normalization, annotation parsing, splits |
 | `test_train.py` | `src/training/train.py` — accuracy, mixup helpers |

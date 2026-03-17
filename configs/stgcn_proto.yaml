@@ -4,7 +4,7 @@
 
 approach: stgcn_proto
 wlasl_variant: 100
-num_keypoints: 543
+num_keypoints: 75
 T: 64
 use_motion: true
 
@@ -34,7 +34,7 @@ scheduler: cosine
 num_workers: 4
 
 # Evaluation
-use_tta: false
+use_tta: true
 
 # Logging
 use_wandb: false

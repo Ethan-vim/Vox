@@ -666,7 +666,7 @@ python -m src.inference.export_onnx `
 
 ```bash
 source .venv/bin/activate
-python -m pytest                          # full test suite (286 tests)
+python -m pytest                          # full test suite (317 tests)
 python -m pytest tests/test_augment.py    # specific test file
 python -m pytest tests/test_dependencies.py  # dependency compatibility tests
 python -m pytest -q                       # quiet output
@@ -682,7 +682,7 @@ Or without activating the venv:
 
 ```powershell
 .venv\Scripts\Activate.ps1
-python -m pytest                          # full test suite (286 tests)
+python -m pytest                          # full test suite (317 tests)
 python -m pytest tests\test_augment.py    # specific test file
 python -m pytest -q                       # quiet output
 ```
@@ -855,13 +855,16 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | Parameter       | Description                                                                                           | Default            |
 | --------------- | ----------------------------------------------------------------------------------------------------- | ------------------ |
 | `approach`              | `stgcn_ce` or `stgcn_proto`                                                                    | `stgcn_ce`         |
-| `num_keypoints`         | Number of MediaPipe landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face)    | `543`              |
+| `num_keypoints`         | Number of landmarks per frame after face drop (33 pose + 21 left hand + 21 right hand)         | `75`               |
 | `d_model`               | ST-GCN embedding dimension (auto-scaled per variant: 128/192/256/384 for 100/300/1000/2000)    | `128`              |
 | `nhead`                 | Number of attention heads (auto-scaled per variant: 4/6/8/8 for 100/300/1000/2000)             | `4`                |
 | `num_layers`            | Number of encoder layers (auto-scaled per variant: 2/4/5/6 for 100/300/1000/2000)              | `2`                |
 | `dropout`               | Dropout rate (auto-scaled per variant: 0.1/0.3/0.4/0.5 for 100/300/1000/2000)                 | `0.5`              |
 | `use_motion`            | Concatenate velocity (frame differences) with position features                                 | `true`             |
 | `normalize_embeddings`  | L2-normalize encoder embeddings (`true` for proto distance-based, `false` for CE logit-based)  | `true`             |
+| `use_attention_pool`    | Attention-weighted temporal pooling (replaces global average pool)                              | `false`            |
+| `drop_path_rate`        | Stochastic depth drop rate per ST-GCN block (0 = disabled)                                     | `0.0`              |
+| `use_cross_attention`   | Cross-branch attention fusion between body/hand branches                                        | `false`            |
 
 
 **Training:**
@@ -874,15 +877,16 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `lr`                      | Learning rate                                                    | `3e-4`     |
 | `weight_decay`            | AdamW weight decay                                               | `5e-4`     |
 | `warmup_epochs`           | Linear warmup epochs before scheduler takes over                 | `15`       |
-| `label_smoothing`         | Label smoothing for cross-entropy loss (0 = disabled)            | `0.0`      |
+| `label_smoothing`         | Label smoothing for cross-entropy loss (0 = disabled)            | `0.1`      |
 | `grad_clip`               | Max gradient norm for clipping                                   | `1.0`      |
 | `fp16`                    | Mixed-precision (FP16) training                                  | `true`     |
 | `weighted_sampling`       | Weighted sampler to counter class imbalance                      | `false`    |
 | `early_stopping_patience` | Epochs without val improvement before stopping                   | `50`       |
-| `mixup_alpha`             | Mixup interpolation strength (0 = disabled)                      | `0.0`      |
+| `mixup_alpha`             | Mixup interpolation strength (0 = disabled)                      | `0.2`      |
 | `head_dropout`            | Dropout before classification head (CE approach)                 | `0.2`      |
 | `class_weighted_loss`     | Inverse-frequency class weights in CE loss (prevents class collapse) | `true`  |
-| `scheduler`               | LR scheduler: `onecycle` or `cosine` (warmup + cosine annealing) | `cosine`   |
+| `scheduler`               | LR scheduler: `onecycle` (per-batch) or `cosine` (per-epoch warmup + cosine annealing) | `onecycle` |
+| `aux_loss_weight`         | Weight for auxiliary branch classification losses (0 = disabled) | `0.0`      |
 
 
 **Evaluation:**
@@ -955,7 +959,7 @@ Dropout is intentionally low for smaller variants: a tiny model (d_model=128, 2 
 
 ### ST-GCN Encoder (Shared)
 
-MediaPipe Holistic extracts 543 landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face), centered on the shoulder midpoint and scaled by shoulder width. Hand landmarks are further normalized relative to their respective wrist, reducing noise from absolute wrist movement. When `use_motion: true` (default), frame-to-frame velocity is concatenated with position, producing 6 features per keypoint `(x, y, z, dx, dy, dz)`.
+MediaPipe Holistic extracts 543 landmarks per frame (33 pose + 21 left hand + 21 right hand + 468 face), centered on the shoulder midpoint and scaled by shoulder width. At load time, face landmarks are dropped, keeping only the first 75 keypoints (pose + hands). Hand landmarks are further normalized relative to their respective wrist, reducing noise from absolute wrist movement. When `use_motion: true` (default), frame-to-frame velocity is concatenated with position, producing 6 features per keypoint `(x, y, z, dx, dy, dz)`.
 
 The ST-GCN encoder processes keypoints through separate body (33 landmarks) and hand (21+21 landmarks) graph convolution branches, then fuses them into a single embedding vector.
 
@@ -1130,8 +1134,8 @@ wlasl_variant: 100
 T: 64
 use_motion: true               # velocity features (position + frame differences)
 normalize_embeddings: false    # CRITICAL for CE — do not enable
-label_smoothing: 0.0           # disabled (counterproductive with ~8 samples/class)
-mixup_alpha: 0.0               # disabled (counterproductive with ~8 samples/class)
+label_smoothing: 0.1           # mild smoothing for regularization
+mixup_alpha: 0.2               # mixup augmentation for regularization
 head_dropout: 0.2              # dropout in two-layer classification head
 batch_size: 32
 lr: 1.0e-3
@@ -1258,14 +1262,14 @@ WLASL's expired URLs mean you may only get 30–60% of the annotated videos. Whe
 1. **Enable weighted sampling** (`weighted_sampling: true`) — ensures every class is seen equally despite imbalance.
 2. **Use smaller batch sizes** (8–16) so the model sees more update steps per epoch.
 3. **Try prototypical training** (`approach: stgcn_proto`) — designed for few-shot scenarios with ~3-8 samples/class.
-4. **Keep label smoothing and mixup disabled** (`label_smoothing: 0.0`, `mixup_alpha: 0.0`) — counterproductive with small datasets.
+4. **Consider reducing label smoothing and mixup** (`label_smoothing: 0.0`, `mixup_alpha: 0.0`) if your dataset is very small (<100 samples).
 5. **Download from Kaggle** (`python scripts/download_kaggle.py`) — the full ~12K video archive is available as a single download.
 
 ### Improving Accuracy
 
 - **Start with `stgcn_ce` (recommended)** — our best model. It trains fastest and is easiest to debug.
 - **Enable motion features** (`use_motion: true`) — velocity information captures signing dynamics and typically adds 5–8% accuracy.
-- **Disable label smoothing and mixup** for small datasets — they are counterproductive with ~8 samples/class.
+- **Reduce or disable label smoothing and mixup** for very small datasets — they can be counterproductive with fewer than ~100 total samples.
 - **Set `normalize_embeddings: false` for CE** — L2 normalization caps logit magnitudes and causes loss plateaus.
 - **Enable TTA for evaluation** (`use_tta: true`) — averages predictions over original + horizontally flipped input for 2–4% evaluation boost.
 - **Use the error analysis notebook** (`notebooks/03_error_analysis.ipynb`) to find which classes are confused, then inspect those videos manually.
