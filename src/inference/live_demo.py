@@ -784,15 +784,13 @@ def run_demo(
                     cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
                 else:
                     # Below confidence threshold -- show the best guess
-                    # but still reset to avoid stuck 64/64 loop
+                    # but keep the rolling buffer so new frames improve it.
+                    # Short cooldown prevents hammering inference on same data.
                     if smoothed is not None:
                         current_prediction = smoothed
                         current_confidence = smoothed["confidence"]
                         current_top5 = smoothed.get("top5")
-                    buffer.clear()
-                    with motion_lock:
-                        motion_detector.reset()
-                    recent_predictions.clear()
+                    cooldown_until = now + poll_interval * 5  # ~0.5s pause
 
     inference_thread = threading.Thread(target=inference_loop, daemon=True)
     inference_thread.start()
