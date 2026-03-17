@@ -22,6 +22,13 @@ if __name__ == "__main__":
         required=True,
         help="Path to YAML config file",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        choices=["cpu", "cuda", "mps"],
+        help="Force device (default: auto-detect)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -33,10 +40,10 @@ if __name__ == "__main__":
 
     if cfg.approach == "stgcn_ce":
         from src.training.train_ce import main
-        main(cfg)
+        main(cfg, device_override=args.device)
     elif cfg.approach == "stgcn_proto":
         from src.training.train_prototypical import main
-        main(cfg)
+        main(cfg, device_override=args.device)
     else:
         raise ValueError(
             f"Unknown approach: '{cfg.approach}'. "

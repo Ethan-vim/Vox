@@ -179,10 +179,12 @@ def validate(
 # ---------------------------------------------------------------------------
 
 
-def main(cfg: Config) -> None:
+def main(cfg: Config, device_override: str | None = None) -> None:
     """Run the full cross-entropy training pipeline."""
     # Device
-    if torch.cuda.is_available():
+    if device_override:
+        device = torch.device(device_override)
+    elif torch.cuda.is_available():
         device = torch.device("cuda")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         device = torch.device("mps")

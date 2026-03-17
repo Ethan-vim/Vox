@@ -392,6 +392,8 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--split", type=str, default="val", choices=["val", "test"])
     parser.add_argument("--output-dir", type=str, default="eval_results")
+    parser.add_argument("--device", type=str, default=None, choices=["cpu", "cuda", "mps"],
+                        help="Force device (default: auto-detect)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -400,7 +402,9 @@ def main() -> None:
     )
 
     cfg = load_config(args.config)
-    if torch.cuda.is_available():
+    if args.device:
+        device = torch.device(args.device)
+    elif torch.cuda.is_available():
         device = torch.device("cuda")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         device = torch.device("mps")
