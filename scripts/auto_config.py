@@ -191,7 +191,6 @@ def build_config_values(
             "num_keypoints": 75,
             "T": 64,
             "use_motion": True,
-            "use_augmentation": True,
             "d_model": 128,
             "gcn_channels": [64, 128, 128],
             "num_layers": 3,
@@ -233,6 +232,8 @@ def build_config_values(
             "normalize_embeddings": True,
             "use_attention_pool": False,
             "drop_path_rate": 0.0,
+            "use_cross_attention": False,
+            "aux_loss_weight": 0.0,
             "n_way": 10,
             "k_shot": 3,
             "q_query": 2,
@@ -265,11 +266,10 @@ def build_config_values(
         "fps_display": True,
         "min_buffer_frames": 30,
         "prediction_cooldown": 1.0,
-        "motion_start_threshold": 0.005,
-        "motion_end_threshold": 0.003,
-        "motion_settle_frames": 8,
-        "max_sign_duration": 90,
-        "static_sign_timeout": 45,
+        "motion_start_threshold": 0.30,
+        "motion_end_threshold": 0.10,
+        "motion_settle_time": 0.27,
+        "max_sign_duration": 3.0,
         "inference_poll_interval": 0.1,
         "data_dir": "data",
         "output_dir": "outputs",
@@ -355,7 +355,6 @@ wlasl_variant: {values['wlasl_variant']}
 num_keypoints: {values['num_keypoints']}
 T: {values['T']}
 use_motion: {_bool(values['use_motion'])}
-use_augmentation: {_bool(values['use_augmentation'])}
 
 # Model (ST-GCN encoder)
 d_model: {values['d_model']}
@@ -397,14 +396,13 @@ smoothing_window: {values['smoothing_window']}
 buffer_size: {values['buffer_size']}
 fps_display: {_bool(values['fps_display'])}
 
-# Sign detection
+# Sign detection (thresholds in normalized-coords/second, FPS-independent)
 min_buffer_frames: {values['min_buffer_frames']}
 prediction_cooldown: {values['prediction_cooldown']}
 motion_start_threshold: {values['motion_start_threshold']}
 motion_end_threshold: {values['motion_end_threshold']}
-motion_settle_frames: {values['motion_settle_frames']}
+motion_settle_time: {values['motion_settle_time']}
 max_sign_duration: {values['max_sign_duration']}
-static_sign_timeout: {values['static_sign_timeout']}
 inference_poll_interval: {values['inference_poll_interval']}
 
 # Paths
@@ -430,6 +428,8 @@ dropout: {values['dropout']}
 normalize_embeddings: {_bool(values['normalize_embeddings'])}
 use_attention_pool: {_bool(values['use_attention_pool'])}
 drop_path_rate: {values['drop_path_rate']}
+use_cross_attention: {_bool(values['use_cross_attention'])}
+aux_loss_weight: {values['aux_loss_weight']}
 
 # Prototypical training
 n_way: {values['n_way']}
@@ -463,14 +463,13 @@ smoothing_window: {values['smoothing_window']}
 buffer_size: {values['buffer_size']}
 fps_display: {_bool(values['fps_display'])}
 
-# Sign detection
+# Sign detection (thresholds in normalized-coords/second, FPS-independent)
 min_buffer_frames: {values['min_buffer_frames']}
 prediction_cooldown: {values['prediction_cooldown']}
 motion_start_threshold: {values['motion_start_threshold']}
 motion_end_threshold: {values['motion_end_threshold']}
-motion_settle_frames: {values['motion_settle_frames']}
+motion_settle_time: {values['motion_settle_time']}
 max_sign_duration: {values['max_sign_duration']}
-static_sign_timeout: {values['static_sign_timeout']}
 inference_poll_interval: {values['inference_poll_interval']}
 
 # Paths

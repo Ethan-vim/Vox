@@ -100,10 +100,16 @@ class MotionDetector:
     Uses a state machine (IDLE -> SIGNING -> COMPLETED) to determine
     when a sign has been completed before triggering inference.
 
+    All velocity comparisons are in **normalized-coordinates per second**,
+    making them independent of camera FPS.  The detector measures the
+    actual time delta between ``update()`` calls and divides displacement
+    by dt to get a consistent velocity regardless of whether the camera
+    runs at 30fps, 60fps, or anything in between.
+
     Parameters
     ----------
     cfg : Config
-        Configuration with motion detection thresholds.
+        Configuration with motion detection thresholds (per-second units).
     """
 
     # Hand keypoint indices in the 543-keypoint array (left: 33-53, right: 54-74)
@@ -111,30 +117,24 @@ class MotionDetector:
     HAND_END = 75
 
     def __init__(self, cfg: "Config") -> None:
-        self.start_threshold = cfg.motion_start_threshold
-        self.end_threshold = cfg.motion_end_threshold
-        self.settle_frames = cfg.motion_settle_frames
-        self.max_duration = cfg.max_sign_duration
-        self.static_timeout = cfg.static_sign_timeout
+        self.start_threshold = cfg.motion_start_threshold  # norm-coords/sec
+        self.end_threshold = cfg.motion_end_threshold  # norm-coords/sec
+        self.settle_duration = getattr(cfg, "motion_settle_time", 0.27)  # seconds
+        self.max_duration = cfg.max_sign_duration  # seconds
 
         self._state = "IDLE"
         self._prev_hand_kps: Optional[np.ndarray] = None
-        self._signing_frames = 0
-        self._settle_count = 0
-        self._idle_frames = 0
+        self._last_update_time: Optional[float] = None
+        self._signing_elapsed: float = 0.0
+        self._settle_elapsed: float = 0.0
 
     @property
     def state(self) -> str:
         """Current state: IDLE, SIGNING, or COMPLETED."""
         return self._state
 
-    @property
-    def idle_duration(self) -> int:
-        """Number of consecutive idle frames."""
-        return self._idle_frames
-
-    def _hand_velocity(self, keypoints: np.ndarray) -> float:
-        """Compute mean L2 velocity of hand keypoints from previous frame.
+    def _hand_displacement(self, keypoints: np.ndarray) -> float:
+        """Compute mean L2 displacement of hand keypoints from previous frame.
 
         Parameters
         ----------
@@ -144,7 +144,8 @@ class MotionDetector:
         Returns
         -------
         float
-            Mean L2 displacement across the 42 hand keypoints.
+            Mean L2 displacement across the 42 hand keypoints
+            (normalized-coordinate units, NOT per second).
         """
         hand_kps = keypoints[self.HAND_START:self.HAND_END]
 
@@ -152,9 +153,6 @@ class MotionDetector:
         # false velocity spikes that incorrectly trigger SIGNING state.
         hand_norm = np.linalg.norm(hand_kps, axis=1).sum()
         if hand_norm < 1e-6:
-            # Hands not detected — invalidate reference so the first valid
-            # frame after a gap re-initializes instead of computing a large
-            # displacement from the stale reference.
             self._prev_hand_kps = None
             return 0.0
 
@@ -165,41 +163,58 @@ class MotionDetector:
         self._prev_hand_kps = hand_kps.copy()
         return float(np.mean(displacement))
 
-    def update(self, keypoints: np.ndarray) -> str:
+    def update(self, keypoints: np.ndarray, dt: Optional[float] = None) -> str:
         """Ingest a new frame and return the current state.
+
+        Measures wall-clock time between calls to convert displacement
+        into velocity (norm-coords/second), so thresholds behave
+        identically on any camera FPS.
 
         Parameters
         ----------
         keypoints : np.ndarray
             Shape ``(NUM_KEYPOINTS, 3)`` for the latest frame.
+        dt : float or None
+            Override time delta in seconds (for testing).  When None,
+            wall-clock time is measured automatically.
 
         Returns
         -------
         str
             Current state after processing: IDLE, SIGNING, or COMPLETED.
         """
-        vel = self._hand_velocity(keypoints)
+        if dt is None:
+            now = time.monotonic()
+            if self._last_update_time is not None:
+                dt = now - self._last_update_time
+            else:
+                dt = 0.0
+            self._last_update_time = now
+
+        # Clamp dt to avoid spikes from pauses or first-frame artifacts
+        dt = max(min(dt, 0.5), 0.0)
+
+        displacement = self._hand_displacement(keypoints)
+
+        # Convert displacement-per-frame to velocity-per-second
+        vel = displacement / dt if dt > 0 else 0.0
 
         if self._state == "IDLE":
             if vel >= self.start_threshold:
                 self._state = "SIGNING"
-                self._signing_frames = 1
-                self._settle_count = 0
-                self._idle_frames = 0
-            else:
-                self._idle_frames += 1
+                self._signing_elapsed = 0.0
+                self._settle_elapsed = 0.0
 
         elif self._state == "SIGNING":
-            self._signing_frames += 1
-
+            self._signing_elapsed += dt
             if vel < self.end_threshold:
-                self._settle_count += 1
+                self._settle_elapsed += dt
             else:
-                self._settle_count = 0
+                self._settle_elapsed = 0.0
 
-            if self._settle_count >= self.settle_frames:
+            if self._settle_elapsed >= self.settle_duration:
                 self._state = "COMPLETED"
-            elif self._signing_frames >= self.max_duration:
+            elif self._signing_elapsed >= self.max_duration:
                 self._state = "COMPLETED"
 
         return self._state
@@ -208,9 +223,8 @@ class MotionDetector:
         """Reset to IDLE state and clear all history."""
         self._state = "IDLE"
         self._prev_hand_kps = None
-        self._signing_frames = 0
-        self._settle_count = 0
-        self._idle_frames = 0
+        self._signing_elapsed = 0.0
+        self._settle_elapsed = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -364,13 +378,26 @@ class LivePredictor:
             logger.debug("Buffer too short: %d < %d", keypoints.shape[0], min_frames)
             return None
 
-        # Check hand detection quality: fraction of frames with non-zero hands
+        # Check pose detection quality: shoulders (landmarks 11, 12) must be
+        # detected for normalize_keypoints to produce valid output.  Without
+        # shoulders, centering/scaling is undefined and the model gets garbage.
+        shoulder_kps = keypoints[:, [11, 12], :]  # (N, 2, 3)
+        shoulder_norms = np.linalg.norm(shoulder_kps.reshape(keypoints.shape[0], -1), axis=1)
+        pose_detected_frac = float(np.mean(shoulder_norms > 1e-6))
+        if pose_detected_frac < 0.3:
+            logger.debug(
+                "Poor pose detection: %.0f%% of frames have shoulders — skipping inference",
+                pose_detected_frac * 100,
+            )
+            return None
+
+        # Check hand detection quality
         hand_kps = keypoints[:, 33:75, :]  # left + right hand
         hand_norms = np.linalg.norm(hand_kps.reshape(keypoints.shape[0], -1), axis=1)
         hand_detected_frac = float(np.mean(hand_norms > 1e-6))
         logger.debug(
-            "Buffer: %d frames, hand detection: %.0f%%",
-            keypoints.shape[0], hand_detected_frac * 100,
+            "Buffer: %d frames, pose: %.0f%%, hands: %.0f%%",
+            keypoints.shape[0], pose_detected_frac * 100, hand_detected_frac * 100,
         )
 
         # Normalize
@@ -723,6 +750,18 @@ def run_demo(
                     class_names[idx] = row["gloss"]
             break
 
+    # Open webcam early so we can query its FPS for buffer sizing
+    cap = cv2.VideoCapture(camera_id)
+    if not cap.isOpened():
+        logger.error("Cannot open camera %d", camera_id)
+        return
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    camera_fps = cap.get(cv2.CAP_PROP_FPS)
+    if camera_fps <= 0:
+        camera_fps = 30.0  # fallback if driver doesn't report FPS
+    logger.info("Camera FPS: %.1f", camera_fps)
+
     # Initialize components
     predictor = LivePredictor(
         checkpoint_path=checkpoint_path,
@@ -730,10 +769,11 @@ def run_demo(
         device=device,
         class_names=class_names,
     )
-    # Use max_sign_duration (not buffer_size=T) so the buffer captures the
-    # full sign.  TemporalCrop then uniformly samples down to T, matching
-    # the training pipeline's velocity scale and temporal coverage.
-    buffer = FrameBuffer(max_size=getattr(cfg, "max_sign_duration", 90))
+    # Buffer holds max_sign_duration seconds of frames.  TemporalCrop then
+    # uniformly samples down to T, matching the training pipeline.
+    max_sign_sec = getattr(cfg, "max_sign_duration", 3.0)
+    buffer_frames = int(max_sign_sec * camera_fps) + 10  # small margin
+    buffer = FrameBuffer(max_size=buffer_frames)
     display = ASLDisplay()
 
     # State
@@ -779,21 +819,11 @@ def run_demo(
             # Read motion state (set by main thread)
             with motion_lock:
                 state = current_motion_state
-                idle_dur = motion_detector.idle_duration
-            buf_len = len(buffer)
 
-            # Decide whether to run inference and track the trigger reason.
-            # Only COMPLETED and idle_timeout trigger inference — the buffer
-            # now holds the full sign (up to max_sign_duration frames) so
-            # TemporalCrop can uniformly sample it, matching training.
-            trigger = None
-            if state == "COMPLETED":
-                trigger = "completed"
-            elif state == "IDLE" and buf_len >= getattr(cfg, "min_buffer_frames", 30):
-                if idle_dur >= getattr(cfg, "static_sign_timeout", 45):
-                    trigger = "idle_timeout"
-
-            if trigger is None:
+            # Only infer after the user has actually signed: the state
+            # machine must go IDLE → SIGNING → COMPLETED before we run
+            # the model.  This prevents spurious predictions on idle frames.
+            if state != "COMPLETED":
                 continue
 
             result = predictor.predict_buffer(buffer)
@@ -836,16 +866,6 @@ def run_demo(
 
     inference_thread = threading.Thread(target=inference_loop, daemon=True)
     inference_thread.start()
-
-    # Open webcam
-    cap = cv2.VideoCapture(camera_id)
-    if not cap.isOpened():
-        logger.error("Cannot open camera %d", camera_id)
-        running = False
-        return
-
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     print("ASL Recognition Demo started. Press 'q' to quit, 's' to save prediction.")
 
@@ -909,6 +929,19 @@ def run_demo(
                     0.6,
                     (0, 255, 0),
                     2,
+                    cv2.LINE_AA,
+                )
+
+            # Body detection warning
+            if mp_results is not None and not mp_results.pose_landmarks:
+                cv2.putText(
+                    frame,
+                    "No body detected - adjust position/lighting",
+                    (20, frame.shape[0] - 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 255),
+                    1,
                     cv2.LINE_AA,
                 )
 

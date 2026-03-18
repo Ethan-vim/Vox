@@ -46,6 +46,7 @@
   - [MediaPipe installation issues](#mediapipe-installation-issues) — Line 924
   - [CUDA out of memory](#cuda-out-of-memory) — Line 936
   - [Webcam not detected](#webcam-not-detected) — Line 942
+  - ["No body detected" warning in live demo](#no-body-detected-warning-in-live-demo)
   - [Low accuracy](#low-accuracy) — Line 948
   - [Diagnosing partial data](#diagnosing-partial-data-most-common-issue) — Line 953
   - [wlasl_variant / num_classes mismatch](#wlasl_variant--num_classes-mismatch) — Line 1000
@@ -574,12 +575,13 @@ python -m src.inference.live_demo `
 
 The demo runs three threads: a capture thread reads webcam frames continuously, an inference thread runs the model when a sign is detected as complete, and the main thread renders the overlay. Predictions are smoothed over the last 5 inference windows and only displayed when confidence exceeds the configured threshold (default: 0.6).
 
-**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference). Inference triggers in two scenarios:
+**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The detector is **fully FPS-independent**: it measures real time between frames via `time.monotonic()` and converts displacement into velocity in normalized-coordinates per second, so the same thresholds work identically on 30fps, 60fps, or any other camera rate. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference).
 
-- **Sign completed** (`COMPLETED`): The primary trigger. The buffer holds up to `max_sign_duration` frames (default: 90 = ~3s at 30fps), capturing the full sign. `TemporalCrop` uniformly samples this down to `T` frames, exactly matching the training pipeline's temporal coverage and velocity scale. High-confidence predictions commit to the display and enter a full cooldown. Low-confidence results still display but use a shorter cooldown (30% of `prediction_cooldown`) so the user can retry sooner.
-- **Static sign timeout** (`IDLE` with buffered data): For held handshapes (e.g., fingerspelled letters) that don't produce motion. Same cleanup behavior as sign-completed.
+**Inference only triggers on COMPLETED state** (the full `IDLE` -> `SIGNING` -> `COMPLETED` transition). The detector enters `SIGNING` when hand velocity exceeds `motion_start_threshold` (0.30 norm-coords/sec), then transitions to `COMPLETED` either when velocity drops below `motion_end_threshold` (0.10 norm-coords/sec) for `motion_settle_time` (0.27s) or when `max_sign_duration` (3.0s) elapses. High-confidence predictions commit to the display and enter a full cooldown. Low-confidence results still display but use a shorter cooldown (30% of `prediction_cooldown`) so the user can retry sooner.
 
-**Buffer management:** The buffer size is set to `max_sign_duration` (not `buffer_size`/`T`) so that the entire sign is captured before inference. When the motion detector transitions from `IDLE` to `SIGNING`, the buffer is cleared to remove idle frames. This ensures: (1) only actual sign data is present when inference runs, and (2) `TemporalCrop` uniformly samples the full sign — preserving both temporal extent and velocity magnitude that the model expects from training.
+**Buffer management:** The buffer is sized dynamically from the camera FPS (`max_sign_duration * camera_fps + 10`) rather than a fixed `buffer_size` value, ensuring the buffer can hold the full sign duration regardless of camera frame rate. When the motion detector transitions from `IDLE` to `SIGNING`, the buffer is cleared to remove idle frames. This ensures: (1) only actual sign data is present when inference runs, and (2) `TemporalCrop` uniformly samples the full sign -- preserving both temporal extent and velocity magnitude that the model expects from training.
+
+**Pose quality gate:** Before running the model, `predict_buffer` checks that at least 30% of buffered frames have valid shoulder landmarks. If fewer than 30% pass, inference is skipped entirely and returns `None`, preventing garbage predictions from low-quality pose data. A red "No body detected" warning is shown on the display when MediaPipe cannot detect pose landmarks in the current frame.
 
 **Confidence scaling:** Predictions from partially-filled buffers have their confidence scaled by the buffer fill ratio (`real_frames / T`), so incomplete signs naturally fall below the confidence threshold.
 
@@ -862,6 +864,8 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | `approach`              | `stgcn_ce` or `stgcn_proto`                                                                    | `stgcn_ce`         |
 | `num_keypoints`         | Number of landmarks per frame after face drop (33 pose + 21 left hand + 21 right hand)         | `75`               |
 | `d_model`               | ST-GCN embedding dimension (auto-scaled per variant: 128/192/256/384 for 100/300/1000/2000)    | `128`              |
+| `embedding_dim`         | Final embedding dimension output by the ST-GCN encoder                                         | `128`              |
+| `gcn_channels`          | Channel widths for each ST-GCN block (list of ints)                                            | `[64, 128, 128]`   |
 | `nhead`                 | Number of attention heads (auto-scaled per variant: 4/6/8/8 for 100/300/1000/2000)             | `4`                |
 | `num_layers`            | Number of encoder layers (auto-scaled per variant: 2/4/5/6 for 100/300/1000/2000)              | `2`                |
 | `dropout`               | Dropout rate (auto-scaled per variant: 0.1/0.3/0.4/0.5 for 100/300/1000/2000)                 | `0.5`              |
@@ -909,21 +913,20 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | ---------------------- | ------------------------------------------------------ | ------- |
 | `confidence_threshold` | Minimum confidence for live display                    | `0.6`   |
 | `smoothing_window`     | Number of inference windows to smooth predictions over | `5`     |
-| `buffer_size`          | Target frame count after temporal crop (= `T`)         | `64`    |
 | `fps_display`          | Show FPS counter on live demo overlay                  | `true`  |
 
 **Sign Detection (Live Demo):**
 
+All motion thresholds are in **normalized-coordinates per second**, making them fully FPS-independent. The `MotionDetector` measures real time between frames via `time.monotonic()` and converts displacement to velocity, so the same config works on any camera frame rate.
 
 | Parameter                 | Description                                                    | Default |
 | ------------------------- | -------------------------------------------------------------- | ------- |
 | `min_buffer_frames`       | Minimum real frames before prediction (~1s at 30fps)           | `30`    |
 | `prediction_cooldown`     | Seconds to wait after a confident prediction before next (low-confidence uses 30% of this value) | `1.0`   |
-| `motion_start_threshold`  | Hand velocity threshold to detect sign start                   | `0.005` |
-| `motion_end_threshold`    | Hand velocity threshold to detect sign end                     | `0.003` |
-| `motion_settle_frames`    | Consecutive low-velocity frames to confirm sign end            | `8`     |
-| `max_sign_duration`       | Max frames before forcing sign completion (~3s at 30fps)       | `90`    |
-| `static_sign_timeout`     | Idle frames with buffer data before allowing static prediction | `45`    |
+| `motion_start_threshold`  | Hand velocity to detect sign start (norm-coords/sec) -- requires deliberate hand movement | `0.30`  |
+| `motion_end_threshold`    | Hand velocity to detect sign end (norm-coords/sec) -- detects when signing stops | `0.10`  |
+| `motion_settle_time`      | Seconds of low velocity to confirm sign end                    | `0.27`  |
+| `max_sign_duration`       | Maximum sign length in seconds before forcing completion       | `3.0`   |
 | `inference_poll_interval` | Seconds between inference loop state checks                    | `0.1`   |
 
 
@@ -1064,6 +1067,14 @@ RuntimeError: User specified an unsupported autocast device_type 'mps'
 - Linux: check `ls -la /dev/video`*.
 - macOS: grant camera access in System Settings → Privacy & Security → Camera.
 - Windows: check Device Manager → Cameras. Grant camera access in Settings → Privacy & security → Camera.
+
+### "No body detected" warning in live demo
+
+The live demo displays a red "No body detected - adjust position/lighting" warning when MediaPipe cannot detect pose landmarks in the current frame. Additionally, `predict_buffer` applies a pose detection quality gate: if fewer than 30% of buffered frames have valid shoulder landmarks, inference is skipped entirely and returns `None`. This prevents garbage predictions from low-quality pose data. To resolve:
+
+- Improve lighting -- avoid strong backlighting or very dim environments.
+- Move closer to the camera so your upper body is clearly visible.
+- Reduce occlusion -- ensure your torso and shoulders are not blocked.
 
 ### Low accuracy
 

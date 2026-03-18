@@ -100,7 +100,7 @@ Shows which project files each module imports from (`src.*` imports only).
 | `scripts/validate_videos.py` | Detect and remove fake HTML video files | (none) | Cleaned `data/raw/` |
 | `scripts/reset_configs.py` | Reset YAML configs to README defaults | (none) | `configs/*.yaml` |
 | `scripts/check_mediapipe.py` | Verify MediaPipe installation, diagnose `solutions` import issues | (none) | Diagnostic output to stdout |
-| `scripts/auto_config.py` | Auto-detect hardware (CUDA/MPS/CPU) and generate optimized configs | (none) | `configs/*.yaml` |
+| `scripts/auto_config.py` | Auto-detect hardware (CUDA/MPS/CPU) and generate optimized configs (CE and proto both include `use_cross_attention`, `aux_loss_weight`) | (none) | `configs/*.yaml` |
 
 ### Data Pipeline (`src/data/`)
 
@@ -125,7 +125,7 @@ The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.appro
 
 | Module | Key Functions | Imports From |
 |--------|---------------|--------------|
-| `config.py` | `Config` (dataclass), `load_config()`, `save_config()` | (none — leaf dependency) |
+| `config.py` | `Config` (dataclass with `embedding_dim`, `gcn_channels`, etc.), `load_config()`, `save_config()` | (none — leaf dependency) |
 | `train.py` | `main()` — CLI dispatcher | `config`, `train_ce`, `train_prototypical` |
 | `train_ce.py` | `train_one_epoch()`, `validate()`, `main()` — cross-entropy training with label smoothing, mixup, OneCycleLR/cosine scheduler, and optional auxiliary branch losses | `config`, `augment`, `dataset`, `models` |
 | `train_prototypical.py` | `train_prototypical()` — episodic prototypical training loop | `config`, `augment`, `dataset`, `episode_sampler`, `models` |
@@ -136,7 +136,7 @@ The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.appro
 | Module | Key Classes / Functions | Imports From |
 |--------|------------------------|--------------|
 | `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `models` |
-| `live_demo.py` | `FrameBuffer`, `MotionDetector`, `LivePredictor`, `ASLDisplay`, `run_demo()` | `config`, `preprocess`, `models` |
+| `live_demo.py` | `FrameBuffer`, `MotionDetector`, `LivePredictor`, `ASLDisplay`, `run_demo()` — FPS-independent motion detection via time-based velocity (displacement/dt), pose quality gate (skips inference if <30% valid shoulder frames), and "No body detected" display warning | `config`, `preprocess`, `models` |
 | `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `models` |
 
 ---
@@ -203,16 +203,24 @@ Single Video (predict.py):
 
 Live Demo (live_demo.py):
 
-  Webcam ──> MediaPipe ──> MotionDetector ──> FrameBuffer(max_sign_duration)
+  Webcam ──> MediaPipe ──> MotionDetector ──> FrameBuffer(max_sign_duration * camera_fps + 10)
+    │                           │                      │
+    │                   FPS-independent:               │
+    │                   velocity = displacement/dt     │
+    │                   (dt via time.monotonic())       │
     │                           │                      │
     │                           │  IDLE→SIGNING: clear buffer (drop idle frames)
     │                           │              state: IDLE/SIGNING/COMPLETED
     │                           │                      │
-    │                           │              trigger routing:
-    │                           │              ├─ completed    ──> full cleanup + cooldown
-    │                           │              └─ idle_timeout ──> same as completed
+    │                           │              inference only on COMPLETED:
+    │                           │              ├─ settle_time elapsed ──> COMPLETED
+    │                           │              └─ max_sign_duration   ──> COMPLETED
     │                           │                      │
     │                           v                      v
+    │                     pose quality gate: skip if <30% of buffer
+    │                     frames have valid shoulder landmarks
+    │                           │ (pass)
+    │                           v
     │                     normalize ──> TemporalCrop(T) ──> model ──> prediction
     │                     (full sign frames: TemporalCrop uniformly
     │                      samples to T, matching training pipeline)
@@ -220,6 +228,7 @@ Live Demo (live_demo.py):
     v                                                           v
   Display <───── overlay predicted gloss + confidence + motion state
                  (high-conf: full cooldown, low-conf: 30% cooldown)
+                 Shows "No body detected" warning when pose_landmarks is None
 
 
 ONNX Export (export_onnx.py):
@@ -293,6 +302,10 @@ Config.__post_init__() auto-derives (scales with variant size):
     wlasl_variant: 1000 ──>  num_classes: 1000, d_model: 256, nhead: 8, num_layers: 5, dropout: 0.4
     wlasl_variant: 2000 ──>  num_classes: 2000, d_model: 384, nhead: 8, num_layers: 6, dropout: 0.5
     Note: d_model, nhead, num_layers, dropout are auto-scaled per variant.
+
+YAML-configurable model fields (read by load_config into Config dataclass):
+    embedding_dim: 128          # Final embedding dimension for ST-GCN encoder
+    gcn_channels: [64, 128, 128]  # Channel widths per ST-GCN block
 ```
 
 ---
@@ -308,7 +321,7 @@ Each test file maps to one or more source modules:
 | `test_dataset.py` | `src/data/dataset.py` — Dataset, DataLoader, pad/crop, motion features |
 | `test_evaluate.py` | `src/training/evaluate.py` — metrics, TTA, hard negatives, latency |
 | `test_export_onnx.py` | `src/inference/export_onnx.py` — ONNX export and verification |
-| `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, MotionDetector, prediction smoothing |
+| `test_live_demo.py` | `src/inference/live_demo.py` — FrameBuffer, MotionDetector (FPS-independent, time-based velocity), prediction smoothing |
 | `test_models.py` | `src/models/` — STGCNEncoder, STGCNClassifier, PrototypicalNetwork, normalize_embeddings, DropPath, AttentionPool, CrossBranchAttention, auxiliary heads, 75-keypoint models |
 | `test_predict.py` | `src/inference/predict.py` — SignPredictor inference paths |
 | `test_preprocess.py` | `src/data/preprocess.py` — normalization, annotation parsing, splits |
