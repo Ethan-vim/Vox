@@ -361,7 +361,17 @@ class LivePredictor:
 
         min_frames = getattr(self.cfg, "min_buffer_frames", 30)
         if keypoints.shape[0] < min_frames:
+            logger.debug("Buffer too short: %d < %d", keypoints.shape[0], min_frames)
             return None
+
+        # Check hand detection quality: fraction of frames with non-zero hands
+        hand_kps = keypoints[:, 33:75, :]  # left + right hand
+        hand_norms = np.linalg.norm(hand_kps.reshape(keypoints.shape[0], -1), axis=1)
+        hand_detected_frac = float(np.mean(hand_norms > 1e-6))
+        logger.debug(
+            "Buffer: %d frames, hand detection: %.0f%%",
+            keypoints.shape[0], hand_detected_frac * 100,
+        )
 
         # Normalize
         keypoints = normalize_keypoints(keypoints)
@@ -720,7 +730,10 @@ def run_demo(
         device=device,
         class_names=class_names,
     )
-    buffer = FrameBuffer(max_size=cfg.buffer_size)
+    # Use max_sign_duration (not buffer_size=T) so the buffer captures the
+    # full sign.  TemporalCrop then uniformly samples down to T, matching
+    # the training pipeline's velocity scale and temporal coverage.
+    buffer = FrameBuffer(max_size=getattr(cfg, "max_sign_duration", 90))
     display = ASLDisplay()
 
     # State
@@ -769,13 +782,13 @@ def run_demo(
                 idle_dur = motion_detector.idle_duration
             buf_len = len(buffer)
 
-            # Decide whether to run inference and track the trigger reason
+            # Decide whether to run inference and track the trigger reason.
+            # Only COMPLETED and idle_timeout trigger inference — the buffer
+            # now holds the full sign (up to max_sign_duration frames) so
+            # TemporalCrop can uniformly sample it, matching training.
             trigger = None
             if state == "COMPLETED":
                 trigger = "completed"
-            elif state == "SIGNING" and buf_len >= cfg.buffer_size:
-                # Long sign that filled the buffer — run intermediate inference
-                trigger = "buffer_full"
             elif state == "IDLE" and buf_len >= getattr(cfg, "min_buffer_frames", 30):
                 if idle_dur >= getattr(cfg, "static_sign_timeout", 45):
                     trigger = "idle_timeout"
@@ -794,19 +807,7 @@ def run_demo(
 
                 smoothed = predictor.smooth_predictions(recent_predictions, mode="avg")
 
-                if trigger == "buffer_full":
-                    # Still signing — show intermediate prediction but keep
-                    # accumulating.  The deque auto-evicts old frames so the
-                    # buffer stays current.  Don't reset motion or cooldown;
-                    # the smoothing window can gather multiple predictions
-                    # across the duration of a long sign.
-                    if smoothed is not None:
-                        current_prediction = smoothed
-                        current_confidence = smoothed["confidence"]
-                        current_top5 = smoothed.get("top5")
-                        prediction_time = now
-
-                elif smoothed is not None and smoothed["confidence"] >= cfg.confidence_threshold:
+                if smoothed is not None and smoothed["confidence"] >= cfg.confidence_threshold:
                     # High confidence — commit prediction and reset for next sign
                     current_prediction = smoothed
                     current_confidence = smoothed["confidence"]
@@ -859,10 +860,17 @@ def run_demo(
 
             # Extract keypoints and feed motion detector
             kps, mp_results = predictor.preprocess_frame(frame)
-            buffer.push(kps)
             with motion_lock:
+                prev_state = motion_detector.state
                 m_state = motion_detector.update(kps)
                 current_motion_state = m_state
+                # Clear idle frames when signing begins — prevents idle
+                # frame contamination that dilutes actual sign data.
+                # Training data is trimmed clips (~80-90% sign frames);
+                # without this, the buffer can be ~50% idle frames.
+                if prev_state == "IDLE" and m_state == "SIGNING":
+                    buffer.clear()
+            buffer.push(kps)
             last_mp_results = mp_results
 
             # Get current prediction (thread-safe read)

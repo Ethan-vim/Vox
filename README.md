@@ -574,11 +574,12 @@ python -m src.inference.live_demo `
 
 The demo runs three threads: a capture thread reads webcam frames continuously, an inference thread runs the model when a sign is detected as complete, and the main thread renders the overlay. Predictions are smoothed over the last 5 inference windows and only displayed when confidence exceeds the configured threshold (default: 0.6).
 
-**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference). Inference triggers in three scenarios, each with tailored cleanup behavior:
+**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference). Inference triggers in two scenarios:
 
-- **Sign completed** (`COMPLETED`): The primary trigger. High-confidence predictions commit to the display, clear the buffer, and enter a full cooldown. Low-confidence results still display but use a shorter cooldown (30% of `prediction_cooldown`) so the user can retry sooner.
-- **Buffer full while signing** (`SIGNING` + buffer at capacity): For long signs that fill the rolling buffer, intermediate inference runs without resetting the motion detector or clearing the buffer. The deque auto-evicts old frames, allowing the `smoothing_window` to accumulate multiple predictions across the duration of a long sign.
+- **Sign completed** (`COMPLETED`): The primary trigger. The buffer holds up to `max_sign_duration` frames (default: 90 = ~3s at 30fps), capturing the full sign. `TemporalCrop` uniformly samples this down to `T` frames, exactly matching the training pipeline's temporal coverage and velocity scale. High-confidence predictions commit to the display and enter a full cooldown. Low-confidence results still display but use a shorter cooldown (30% of `prediction_cooldown`) so the user can retry sooner.
 - **Static sign timeout** (`IDLE` with buffered data): For held handshapes (e.g., fingerspelled letters) that don't produce motion. Same cleanup behavior as sign-completed.
+
+**Buffer management:** The buffer size is set to `max_sign_duration` (not `buffer_size`/`T`) so that the entire sign is captured before inference. When the motion detector transitions from `IDLE` to `SIGNING`, the buffer is cleared to remove idle frames. This ensures: (1) only actual sign data is present when inference runs, and (2) `TemporalCrop` uniformly samples the full sign — preserving both temporal extent and velocity magnitude that the model expects from training.
 
 **Confidence scaling:** Predictions from partially-filled buffers have their confidence scaled by the buffer fill ratio (`real_frames / T`), so incomplete signs naturally fall below the confidence threshold.
 
@@ -908,7 +909,7 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | ---------------------- | ------------------------------------------------------ | ------- |
 | `confidence_threshold` | Minimum confidence for live display                    | `0.6`   |
 | `smoothing_window`     | Number of inference windows to smooth predictions over | `5`     |
-| `buffer_size`          | Rolling frame buffer size for live demo                | `64`    |
+| `buffer_size`          | Target frame count after temporal crop (= `T`)         | `64`    |
 | `fps_display`          | Show FPS counter on live demo overlay                  | `true`  |
 
 **Sign Detection (Live Demo):**

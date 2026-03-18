@@ -203,18 +203,19 @@ Single Video (predict.py):
 
 Live Demo (live_demo.py):
 
-  Webcam ──> MediaPipe ──> FrameBuffer(T=64) ──> MotionDetector
+  Webcam ──> MediaPipe ──> MotionDetector ──> FrameBuffer(max_sign_duration)
     │                           │                      │
+    │                           │  IDLE→SIGNING: clear buffer (drop idle frames)
     │                           │              state: IDLE/SIGNING/COMPLETED
     │                           │                      │
     │                           │              trigger routing:
-    │                           │              ├─ completed  ──> full cleanup + cooldown
-    │                           │              ├─ buffer_full ──> keep buffer & motion,
-    │                           │              │                  accumulate smoothing window
+    │                           │              ├─ completed    ──> full cleanup + cooldown
     │                           │              └─ idle_timeout ──> same as completed
     │                           │                      │
     │                           v                      v
-    │                     normalize ──> pad/crop ──> model ──> smoothed prediction
+    │                     normalize ──> TemporalCrop(T) ──> model ──> prediction
+    │                     (full sign frames: TemporalCrop uniformly
+    │                      samples to T, matching training pipeline)
     │                                                           │
     v                                                           v
   Display <───── overlay predicted gloss + confidence + motion state
