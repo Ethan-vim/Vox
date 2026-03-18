@@ -769,18 +769,18 @@ def run_demo(
                 idle_dur = motion_detector.idle_duration
             buf_len = len(buffer)
 
-            # Decide whether to run inference
-            should_infer = False
+            # Decide whether to run inference and track the trigger reason
+            trigger = None
             if state == "COMPLETED":
-                should_infer = True
+                trigger = "completed"
             elif state == "SIGNING" and buf_len >= cfg.buffer_size:
-                # Long sign that filled the buffer — force inference
-                should_infer = True
+                # Long sign that filled the buffer — run intermediate inference
+                trigger = "buffer_full"
             elif state == "IDLE" and buf_len >= getattr(cfg, "min_buffer_frames", 30):
                 if idle_dur >= getattr(cfg, "static_sign_timeout", 45):
-                    should_infer = True
+                    trigger = "idle_timeout"
 
-            if not should_infer:
+            if trigger is None:
                 continue
 
             result = predictor.predict_buffer(buffer)
@@ -793,21 +793,35 @@ def run_demo(
                     recent_predictions = recent_predictions[-cfg.smoothing_window:]
 
                 smoothed = predictor.smooth_predictions(recent_predictions, mode="avg")
-                if smoothed is not None and smoothed["confidence"] >= cfg.confidence_threshold:
+
+                if trigger == "buffer_full":
+                    # Still signing — show intermediate prediction but keep
+                    # accumulating.  The deque auto-evicts old frames so the
+                    # buffer stays current.  Don't reset motion or cooldown;
+                    # the smoothing window can gather multiple predictions
+                    # across the duration of a long sign.
+                    if smoothed is not None:
+                        current_prediction = smoothed
+                        current_confidence = smoothed["confidence"]
+                        current_top5 = smoothed.get("top5")
+                        prediction_time = now
+
+                elif smoothed is not None and smoothed["confidence"] >= cfg.confidence_threshold:
+                    # High confidence — commit prediction and reset for next sign
                     current_prediction = smoothed
                     current_confidence = smoothed["confidence"]
                     current_top5 = smoothed.get("top5")
                     prediction_time = now
 
-                    # Post-prediction cooldown
                     buffer.clear()
                     with motion_lock:
                         motion_detector.reset()
                     recent_predictions.clear()
                     cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
+
                 else:
-                    # Below confidence threshold — clear and wait for next sign.
-                    # Re-inferring on the same stale data won't improve results.
+                    # Low confidence on a completed/idle sign — show result
+                    # but use a shorter cooldown so the user can retry sooner.
                     if smoothed is not None:
                         current_prediction = smoothed
                         current_confidence = smoothed["confidence"]
@@ -817,7 +831,7 @@ def run_demo(
                     with motion_lock:
                         motion_detector.reset()
                     recent_predictions.clear()
-                    cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0)
+                    cooldown_until = now + getattr(cfg, "prediction_cooldown", 1.0) * 0.3
 
     inference_thread = threading.Thread(target=inference_loop, daemon=True)
     inference_thread.start()

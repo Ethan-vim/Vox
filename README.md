@@ -574,7 +574,11 @@ python -m src.inference.live_demo `
 
 The demo runs three threads: a capture thread reads webcam frames continuously, an inference thread runs the model when a sign is detected as complete, and the main thread renders the overlay. Predictions are smoothed over the last 5 inference windows and only displayed when confidence exceeds the configured threshold (default: 0.6).
 
-**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference). Predictions only fire after sign completion, when the buffer is full, or after a static sign timeout (for held handshapes like fingerspelled letters). After a confident prediction, the buffer is cleared and a cooldown period prevents re-predicting the same sign.
+**Motion-aware sign detection:** The demo uses a `MotionDetector` that tracks hand keypoint velocity to detect when a sign starts and ends. The status bar shows the current state: `IDLE` (waiting for motion), `SIGNING` (motion in progress), or `COMPLETED` (sign finished, running inference). Inference triggers in three scenarios, each with tailored cleanup behavior:
+
+- **Sign completed** (`COMPLETED`): The primary trigger. High-confidence predictions commit to the display, clear the buffer, and enter a full cooldown. Low-confidence results still display but use a shorter cooldown (30% of `prediction_cooldown`) so the user can retry sooner.
+- **Buffer full while signing** (`SIGNING` + buffer at capacity): For long signs that fill the rolling buffer, intermediate inference runs without resetting the motion detector or clearing the buffer. The deque auto-evicts old frames, allowing the `smoothing_window` to accumulate multiple predictions across the duration of a long sign.
+- **Static sign timeout** (`IDLE` with buffered data): For held handshapes (e.g., fingerspelled letters) that don't produce motion. Same cleanup behavior as sign-completed.
 
 **Confidence scaling:** Predictions from partially-filled buffers have their confidence scaled by the buffer fill ratio (`real_frames / T`), so incomplete signs naturally fall below the confidence threshold.
 
@@ -913,7 +917,7 @@ Windows (PowerShell / Command Prompt): the commands are identical — just run t
 | Parameter                 | Description                                                    | Default |
 | ------------------------- | -------------------------------------------------------------- | ------- |
 | `min_buffer_frames`       | Minimum real frames before prediction (~1s at 30fps)           | `30`    |
-| `prediction_cooldown`     | Seconds to wait after a confident prediction before next       | `1.0`   |
+| `prediction_cooldown`     | Seconds to wait after a confident prediction before next (low-confidence uses 30% of this value) | `1.0`   |
 | `motion_start_threshold`  | Hand velocity threshold to detect sign start                   | `0.005` |
 | `motion_end_threshold`    | Hand velocity threshold to detect sign end                     | `0.003` |
 | `motion_settle_frames`    | Consecutive low-velocity frames to confirm sign end            | `8`     |

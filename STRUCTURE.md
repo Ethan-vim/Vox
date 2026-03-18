@@ -207,14 +207,18 @@ Live Demo (live_demo.py):
     │                           │                      │
     │                           │              state: IDLE/SIGNING/COMPLETED
     │                           │                      │
-    │                           │              [sign complete OR buffer full OR static timeout]
+    │                           │              trigger routing:
+    │                           │              ├─ completed  ──> full cleanup + cooldown
+    │                           │              ├─ buffer_full ──> keep buffer & motion,
+    │                           │              │                  accumulate smoothing window
+    │                           │              └─ idle_timeout ──> same as completed
     │                           │                      │
     │                           v                      v
-    │                     normalize ──> pad/crop ──> confidence scaling ──> model
-    │                                                                        │
-    v                                                                        v
+    │                     normalize ──> pad/crop ──> model ──> smoothed prediction
+    │                                                           │
+    v                                                           v
   Display <───── overlay predicted gloss + confidence + motion state
-                 (smoothed over 5 windows, cooldown after prediction)
+                 (high-conf: full cooldown, low-conf: 30% cooldown)
 
 
 ONNX Export (export_onnx.py):
