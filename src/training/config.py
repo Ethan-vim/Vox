@@ -104,6 +104,7 @@ class Config:
     motion_settle_time: float = 0.27  # Seconds of low velocity to confirm sign end
     max_sign_duration: float = 3.0  # Seconds before forcing sign completion
     inference_poll_interval: float = 0.1  # Seconds between inference loop checks
+    pre_sign_duration: float = 0.5  # Seconds of pre-sign context to retain on IDLE->SIGNING
 
     # --- Resume ---
     resume_checkpoint: Optional[str] = None

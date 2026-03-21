@@ -88,6 +88,23 @@ class FrameBuffer:
         with self._lock:
             self._buffer.clear()
 
+    def trim_to(self, n: int) -> None:
+        """Keep only the most recent *n* frames, discarding older ones.
+
+        Used for pre-trigger buffering: when signing starts, retain a few
+        seconds of pre-sign context (sign onset) instead of clearing
+        everything. If the buffer has fewer than *n* frames, nothing
+        is removed.
+
+        Parameters
+        ----------
+        n : int
+            Maximum number of frames to retain.
+        """
+        with self._lock:
+            while len(self._buffer) > n:
+                self._buffer.popleft()
+
 
 # ---------------------------------------------------------------------------
 # Motion detector
@@ -762,6 +779,10 @@ def run_demo(
         camera_fps = 30.0  # fallback if driver doesn't report FPS
     logger.info("Camera FPS: %.1f", camera_fps)
 
+    pre_sign_dur = getattr(cfg, "pre_sign_duration", 0.5)
+    pre_sign_frames = int(pre_sign_dur * camera_fps)
+    logger.info("Pre-sign buffer: %d frames (%.1fs)", pre_sign_frames, pre_sign_dur)
+
     # Initialize components
     predictor = LivePredictor(
         checkpoint_path=checkpoint_path,
@@ -884,12 +905,12 @@ def run_demo(
                 prev_state = motion_detector.state
                 m_state = motion_detector.update(kps)
                 current_motion_state = m_state
-                # Clear idle frames when signing begins — prevents idle
-                # frame contamination that dilutes actual sign data.
-                # Training data is trimmed clips (~80-90% sign frames);
-                # without this, the buffer can be ~50% idle frames.
+                # Trim idle frames when signing begins — keep only
+                # pre_sign_frames of context so the model sees sign onset
+                # (preparation phase). Training data includes full videos
+                # with prep frames; discarding them all creates a mismatch.
                 if prev_state == "IDLE" and m_state == "SIGNING":
-                    buffer.clear()
+                    buffer.trim_to(pre_sign_frames)
             buffer.push(kps)
             last_mp_results = mp_results
 

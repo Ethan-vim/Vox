@@ -271,6 +271,7 @@ def build_config_values(
         "motion_settle_time": 0.27,
         "max_sign_duration": 3.0,
         "inference_poll_interval": 0.1,
+        "pre_sign_duration": 0.5,
         "data_dir": "data",
         "output_dir": "outputs",
         "checkpoint_dir": "checkpoints",
@@ -404,6 +405,7 @@ motion_end_threshold: {values['motion_end_threshold']}
 motion_settle_time: {values['motion_settle_time']}
 max_sign_duration: {values['max_sign_duration']}
 inference_poll_interval: {values['inference_poll_interval']}
+pre_sign_duration: {values['pre_sign_duration']}
 
 # Paths
 data_dir: {values['data_dir']}
@@ -471,6 +473,7 @@ motion_end_threshold: {values['motion_end_threshold']}
 motion_settle_time: {values['motion_settle_time']}
 max_sign_duration: {values['max_sign_duration']}
 inference_poll_interval: {values['inference_poll_interval']}
+pre_sign_duration: {values['pre_sign_duration']}
 
 # Paths
 data_dir: {values['data_dir']}

@@ -52,6 +52,7 @@ motion_end_threshold: 0.10
 motion_settle_time: 0.27
 max_sign_duration: 3.0
 inference_poll_interval: 0.1
+pre_sign_duration: 0.5
 
 # Paths
 data_dir: data

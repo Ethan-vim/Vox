@@ -136,7 +136,7 @@ The unified `build_model(cfg)` factory in `__init__.py` dispatches on `cfg.appro
 | Module | Key Classes / Functions | Imports From |
 |--------|------------------------|--------------|
 | `predict.py` | `SignPredictor`, `_load_class_names()` | `config`, `augment`, `preprocess`, `models` |
-| `live_demo.py` | `FrameBuffer`, `MotionDetector`, `LivePredictor`, `ASLDisplay`, `run_demo()` — FPS-independent motion detection via time-based velocity (displacement/dt), pose quality gate (skips inference if <30% valid shoulder frames), and "No body detected" display warning | `config`, `preprocess`, `models` |
+| `live_demo.py` | `FrameBuffer`, `MotionDetector`, `LivePredictor`, `ASLDisplay`, `run_demo()` — FPS-independent motion detection via time-based velocity (displacement/dt), pre-trigger buffering (retains sign onset frames on IDLE→SIGNING), pose quality gate (skips inference if <30% valid shoulder frames), and "No body detected" display warning | `config`, `preprocess`, `models` |
 | `export_onnx.py` | `export_to_onnx()`, `verify_onnx()`, `benchmark_onnx()` | `config`, `models` |
 
 ---
@@ -209,7 +209,7 @@ Live Demo (live_demo.py):
     │                   velocity = displacement/dt     │
     │                   (dt via time.monotonic())       │
     │                           │                      │
-    │                           │  IDLE→SIGNING: clear buffer (drop idle frames)
+    │                           │  IDLE→SIGNING: trim buffer to pre_sign_frames (keep sign onset)
     │                           │              state: IDLE/SIGNING/COMPLETED
     │                           │                      │
     │                           │              inference only on COMPLETED:

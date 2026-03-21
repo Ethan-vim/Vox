@@ -579,7 +579,7 @@ The demo runs three threads: a capture thread reads webcam frames continuously, 
 
 **Inference only triggers on COMPLETED state** (the full `IDLE` -> `SIGNING` -> `COMPLETED` transition). The detector enters `SIGNING` when hand velocity exceeds `motion_start_threshold` (0.30 norm-coords/sec), then transitions to `COMPLETED` either when velocity drops below `motion_end_threshold` (0.10 norm-coords/sec) for `motion_settle_time` (0.27s) or when `max_sign_duration` (3.0s) elapses. High-confidence predictions commit to the display and enter a full cooldown. Low-confidence results still display but use a shorter cooldown (30% of `prediction_cooldown`) so the user can retry sooner.
 
-**Buffer management:** The buffer is sized dynamically from the camera FPS (`max_sign_duration * camera_fps + 10`) rather than a fixed `buffer_size` value, ensuring the buffer can hold the full sign duration regardless of camera frame rate. When the motion detector transitions from `IDLE` to `SIGNING`, the buffer is cleared to remove idle frames. This ensures: (1) only actual sign data is present when inference runs, and (2) `TemporalCrop` uniformly samples the full sign -- preserving both temporal extent and velocity magnitude that the model expects from training.
+**Buffer management:** The buffer is sized dynamically from the camera FPS (`max_sign_duration * camera_fps + 10`) rather than a fixed `buffer_size` value, ensuring the buffer can hold the full sign duration regardless of camera frame rate. When the motion detector transitions from `IDLE` to `SIGNING`, the buffer is trimmed to keep only the most recent `pre_sign_duration` seconds of frames (default 0.5s). This "pre-trigger buffer" preserves the sign's preparation phase (the hand movement ramp-up that precedes the velocity threshold) while discarding old idle frames. The training data includes full video clips with preparation frames, so preserving sign onset in the live buffer keeps inference data consistent with what the model was trained on.
 
 **Pose quality gate:** Before running the model, `predict_buffer` checks that at least 30% of buffered frames have valid shoulder landmarks. If fewer than 30% pass, inference is skipped entirely and returns `None`, preventing garbage predictions from low-quality pose data. A red "No body detected" warning is shown on the display when MediaPipe cannot detect pose landmarks in the current frame.
 
@@ -928,6 +928,7 @@ All motion thresholds are in **normalized-coordinates per second**, making them 
 | `motion_settle_time`      | Seconds of low velocity to confirm sign end                    | `0.27`  |
 | `max_sign_duration`       | Maximum sign length in seconds before forcing completion       | `3.0`   |
 | `inference_poll_interval` | Seconds between inference loop state checks                    | `0.1`   |
+| `pre_sign_duration`       | Seconds of pre-sign frames to retain when signing starts (preserves sign onset for model accuracy) | `0.5`   |
 
 
 **Logging:**

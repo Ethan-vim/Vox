@@ -60,6 +60,36 @@ class TestFrameBuffer:
         assert result[0, 0, 0] == 2.0
         assert result[-1, 0, 0] == 4.0
 
+    def test_trim_to_keeps_recent(self):
+        """trim_to(n) keeps the n most recent frames."""
+        buf = FrameBuffer(max_size=20)
+        for i in range(10):
+            frame = np.full((NUM_KP, 3), float(i), dtype=np.float32)
+            buf.push(frame)
+        buf.trim_to(3)
+        assert len(buf) == 3
+        result = buf.get_all()
+        # Should keep frames 7, 8, 9 (the 3 most recent)
+        assert result[0, 0, 0] == 7.0
+        assert result[1, 0, 0] == 8.0
+        assert result[2, 0, 0] == 9.0
+
+    def test_trim_to_noop_when_smaller(self):
+        """trim_to(n) does nothing when buffer has fewer than n frames."""
+        buf = FrameBuffer(max_size=20)
+        for _ in range(3):
+            buf.push(np.random.rand(NUM_KP, 3).astype(np.float32))
+        buf.trim_to(10)
+        assert len(buf) == 3
+
+    def test_trim_to_zero_clears(self):
+        """trim_to(0) removes all frames."""
+        buf = FrameBuffer(max_size=10)
+        for _ in range(5):
+            buf.push(np.random.rand(NUM_KP, 3).astype(np.float32))
+        buf.trim_to(0)
+        assert len(buf) == 0
+
 
 # ---------------------------------------------------------------------------
 # LivePredictor.smooth_predictions (static method)
